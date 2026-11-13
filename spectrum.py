@@ -35,7 +35,6 @@ def measure_flux(
         var_sum = float(aperture_photometry(np.nan_to_num(variance, nan=0.0), ap)["aperture_sum"][0])
         err = float(np.sqrt(max(var_sum, 0.0)))
     else:
-        # Оценка шума по разбросу фона в кольце, если слой variance отсутствует
         bkg_std = float(np.nanstd(bkg_vals))
         err = float(bkg_std * np.sqrt(ap.area)) if np.isfinite(bkg_std) else 0.01
 
@@ -43,16 +42,23 @@ def measure_flux(
 
 
 def extract_spectrum_with_errors(
-    cutouts: list[dict], ra: float, dec: float
+    cutouts: list[dict],
+    ra: float,
+    dec: float,
+    valid_detectors: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Собирает спектр (длина волны в мкм, поток, погрешность) по списку вырезок из data.load_cutouts().
+    При передаче valid_detectors (например, [5, 6]) фильтрует только нужные детекторы.
     """
     wavelengths: list[float] = []
     fluxes: list[float] = []
     errors: list[float] = []
 
     for c in cutouts:
+        if valid_detectors is not None and c.get("detector") not in valid_detectors:
+            continue
+
         img = c["image"].astype(np.float64)
         if c.get("zodi") is not None:
             img = img - c["zodi"].astype(np.float64)
@@ -65,7 +71,6 @@ def extract_spectrum_with_errors(
         x, y = float(x_raw), float(y_raw)
         h, w = img.shape
 
-        # Пропускаем, если объект вне кадра или слишком близко к краю (нужен отступ 6 пикс. для кольца фона)
         if not (6 <= x < w - 6 and 6 <= y < h - 6):
             continue
 
@@ -98,18 +103,28 @@ def extract_spectrum_with_errors(
     )
 
 
-def extract_spectrum(cutouts: list[dict], ra: float, dec: float) -> tuple[np.ndarray, np.ndarray]:
-    """Обратная совместимость: возвращает (wavelength, flux)."""
-    wl, flux, _ = extract_spectrum_with_errors(cutouts, ra, dec)
+def extract_spectrum(
+    cutouts: list[dict],
+    ra: float,
+    dec: float,
+    valid_detectors: list[int] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Возвращает (wavelength, flux) с поддержкой фильтрации valid_detectors."""
+    wl, flux, _ = extract_spectrum_with_errors(cutouts, ra, dec, valid_detectors=valid_detectors)
     return wl, flux
 
 
-def get_spectrum(cutouts: list[dict], ra: float, dec: float) -> dict[str, list[float]]:
+def get_spectrum(
+    cutouts: list[dict],
+    ra: float,
+    dec: float,
+    valid_detectors: list[int] | None = None,
+) -> dict[str, list[float]]:
     """
     Формат строго по контракту API.md для эндпоинта GET /api/object:
     {"wavelength": [...], "flux": [...], "error": [...]}
     """
-    wl, flux, err = extract_spectrum_with_errors(cutouts, ra, dec)
+    wl, flux, err = extract_spectrum_with_errors(cutouts, ra, dec, valid_detectors=valid_detectors)
     return {
         "wavelength": [round(float(v), 4) for v in wl],
         "flux": [round(float(v), 6) for v in flux],
@@ -167,8 +182,8 @@ if __name__ == "__main__":
     tbl = find_images(RA, DEC, size_deg=0.05)
     cutouts = load_cutouts(tbl[:80])
 
-    spec_json = get_spectrum(cutouts, RA, DEC)
-    mol_json = molecule_scores(np.array(spec_json["wavelength"]), np.array(spec_json["flux"]))
+    spec_all = get_spectrum(cutouts, RA, DEC)
+    spec_d56 = get_spectrum(cutouts, RA, DEC, valid_detectors=[5, 6])
 
-    print("Точек в API-ответе:", len(spec_json["wavelength"]))
-    print("Молекулы (API):", mol_json)
+    print("Точек (все детекторы):", len(spec_all["wavelength"]))
+    print("Точек (только D5, D6):", len(spec_d56["wavelength"]))
