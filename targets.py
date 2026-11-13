@@ -2,11 +2,14 @@
 
     coord_at(name, when="2025-11-15") -> SkyCoord на нужную дату
 
-Источник: Gaia DR3 (эпоха 2016.0), для WISE 0855 — позиция из обозначения WISE (эпоха ~2010.5)
-и собственное движение из Luhman & Esplin 2016 (в Gaia его нет — слишком холодный).
+Источник: SIMBAD (зеркало simbad.harvard.edu — основной сервер CDS бывает недоступен).
+Barnard, eps Ind B, R Dra — Gaia DR3 через SIMBAD; WISE 0855 — Kirkpatrick et al. 2021 через SIMBAD;
+RW Aur — Gaia DR3 напрямую (в SIMBAD для него устаревшие данные Hipparcos).
+Значения записаны в файл, чтобы всё работало без сети; simbad_coord() берёт свежие из SIMBAD.
 Середина данных SPHEREx (май 2025 – май 2026) ≈ ноябрь 2025, поэтому дата по умолчанию такая:
 объект попадает почти в центр вырезки во всех эпохах.
 """
+import numpy as np
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
@@ -26,8 +29,8 @@ TARGETS = {
     ),
     "wise0855": dict(
         title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", kind="самый холодный известный коричневый карлик",
-        gaia_dr3=None, ra=133.795125, dec=-7.245139,
-        pmra=-8118.0, pmdec=680.0, parallax=438.0, epoch=2010.5,
+        gaia_dr3=None, ra=133.81890825, dec=-7.247048,
+        pmra=-8123.7, pmdec=673.2, parallax=439.0, epoch=2000.0,
     ),
     "rw_aur": dict(
         title="RW Возничего", simbad="RW Aur", kind="молодая переменная звезда (тип T Тельца)",
@@ -40,6 +43,33 @@ TARGETS = {
         pmra=-20.642811719160797, pmdec=6.148818852711324, parallax=1.2509180143740992, epoch=2016.0,
     ),
 }
+
+
+SIMBAD_SERVER = "simbad.harvard.edu"
+
+
+def simbad():
+    """Клиент SIMBAD, настроенный на зеркало Гарварда."""
+    from astroquery.simbad import Simbad, conf
+    conf.server = SIMBAD_SERVER
+    s = Simbad()
+    s.add_votable_fields("pmra", "pmdec", "plx_value")
+    return s
+
+
+def simbad_coord(name: str, when: str = DEFAULT_WHEN) -> SkyCoord:
+    """Любой объект по имени из SIMBAD -> координаты на дату when (позиции SIMBAD даны на J2000)."""
+    r = simbad().query_object(name)
+    if r is None or len(r) == 0:
+        raise ValueError(f"SIMBAD не знает объект {name!r}")
+    r = r[0]
+    pmra = float(r["pmra"]) if r["pmra"] is not None and np.isfinite(r["pmra"]) else 0.0
+    pmdec = float(r["pmdec"]) if r["pmdec"] is not None and np.isfinite(r["pmdec"]) else 0.0
+    plx = float(r["plx_value"]) if r["plx_value"] is not None and np.isfinite(r["plx_value"]) and r["plx_value"] > 0 else None
+    c = SkyCoord(ra=float(r["ra"]) * u.deg, dec=float(r["dec"]) * u.deg,
+                 pm_ra_cosdec=pmra * u.mas / u.yr, pm_dec=pmdec * u.mas / u.yr,
+                 distance=(1000 / plx) * u.pc if plx else 1 * u.kpc, obstime=Time("J2000"))
+    return c.apply_space_motion(new_obstime=Time(when))
 
 
 def coord_at(name: str, when: str = DEFAULT_WHEN) -> SkyCoord:

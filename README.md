@@ -25,7 +25,8 @@ pip install -r requirements.txt
 | `epochs.py` | `build_frames(..., info=[])` | заполнит `info` подписями кадров: число экспозиций, длина волны в точке, даты |
 | `epochs.py` | `diff_frames(frames)` | режим «что изменилось»: кадр минус первая эпоха (с подгонкой яркости) |
 | `epochs.py` | `select_exposures(table, per_group=3)` | быстрый режим: ≤ N снимков на (эпоху, детектор) — для живого сайта |
-| `targets.py` | `coord_at(name, when)` | координаты 5 тестовых объектов на дату (Gaia DR3 + собственное движение) |
+| `targets.py` | `coord_at(name, when)` | координаты 5 тестовых объектов на дату (из SIMBAD/Gaia DR3, записаны в файл — работает без сети) |
+| `targets.py` | `simbad_coord(name, when)` | любой объект по имени из SIMBAD на дату; `simbad()` — клиент на зеркале **simbad.harvard.edu** (основной CDS бывает недоступен) |
 
 Пример:
 
