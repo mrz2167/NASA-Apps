@@ -401,7 +401,7 @@ def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0) -> dict | Non
     pm = float(np.hypot(pmra, pmdec)) / 1000 if np.isfinite(pmra) and np.isfinite(pmdec) else None
     sid = int(r["source_id"])
     return {"found": True, "name": f"Gaia DR3 {sid}", "catalog_id": f"Gaia DR3 {sid}",
-            "otype": f"звезда, G={float(r['phot_g_mean_mag']):.1f}", "source": "Gaia DR3",
+            "otype": f"star, G={float(r['phot_g_mean_mag']):.1f}", "source": "Gaia DR3",
             "pm_arcsec_yr": round(pm, 3) if pm else None, "simbad_url": _simbad_link(coord, 15.0)}
 
 
@@ -411,8 +411,9 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
             "simbad_url": _simbad_link(coord, radius_arcsec), "pm_arcsec_yr": None, "catalog_id": None}
 
     for key, t in TARGETS.items():
-        if coord.separation(coord_at(key, "2026-01-01")).arcsec < 30.0:
+        if coord.separation(coord_at(key, "2026-01-01")).arcsec < 12.0:
             info.update(found=True, name=t["title"], otype=t["kind"], source="targets (Gaia DR3/SIMBAD)",
+                        catalog_en=t.get("catalog_en"), name_en=t.get("name_en"),
                         catalog_id=t["simbad"], pm_arcsec_yr=round(float(np.hypot(t["pmra"], t["pmdec"])) / 1000, 2))
             return info
     if not online:

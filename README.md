@@ -11,6 +11,22 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Запуск сайта целиком
+
+```
+pip install -r requirements.txt
+uvicorn main:app --port 8077
+```
+Открыть **http://localhost:8077/** — сайт (`web/index.html`) и API с одного адреса, реальные данные SPHEREx.
+`?api=demo` — симулированное небо без бэкенда; `?api=https://host` — другой сервер.
+
+Проверено в браузере: все 5 кейсов открываются, клик по цели даёт верный вердикт сайта
+(Barnard — Nearby star on the move, WISE 0855 и eps Ind B — Looks like a cold brown dwarf, RW Aur и R Dra — Variable star),
+кейс 04 закрывается на реальных данных.
+
+Правки во фронтенде: координаты целей — на время данных SPHEREx (J2000 Барнарда за краем кадра);
+`API_BASE` определяется сам; вердикт и стрелка учитывают `motion.significant`, незначимое движение помечено «within noise».
+
 ## Бэкенд для сайта (LUMEN Skywatch): `main.py` по контракту [API.md](API.md)
 
 ```

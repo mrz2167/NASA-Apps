@@ -17,7 +17,10 @@ from collections import OrderedDict
 
 import numpy as np
 from astropy.coordinates import SkyCoord
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 
@@ -38,6 +41,14 @@ DIFF_NEG = np.array([0x3D, 0x5B, 0xD9], float)   # темнее — синий
 DIFF_ZERO = np.array([0x07, 0x0A, 0x20], float)  # без изменений — фон
 
 
+WEB = Path(__file__).resolve().parent / "web"
+
+
+@app.get("/", include_in_schema=False)
+def site():
+    return FileResponse(WEB / "index.html")
+
+
 # ---------- кэш наборов кадров ----------
 
 _SKIES: "OrderedDict[tuple, dict]" = OrderedDict()
@@ -53,6 +64,12 @@ def _load_sky(ra: float, dec: float, fov: float) -> dict:
             _SKIES.move_to_end(key)
             return _SKIES[key]
     sky = None
+    if fov < 0.1:
+        try:
+            big = _load_sky(ra, dec, 0.1)
+            return _crop_sky(big, fov)
+        except SkyUnavailable:
+            pass
     try:
         full = get_sky(ra, dec, fov, quick=False, offline=True)
         if full["n_loaded"] >= 0.8 * full["n_found"]:
@@ -114,6 +131,18 @@ def _gaia_for(sky: dict, wait_s: float = 0.0):
     if th is not None and wait_s > 0:
         th.join(wait_s)
     return _GAIA.get(key)
+
+
+def _crop_sky(sky: dict, fov: float) -> dict:
+    """Центральный квадрат fov из набора кадров побольше (без повторной загрузки)."""
+    from epochs import diff_frames, frames_by_detector
+    ny, nx = sky["shape"]
+    n = max(8, int(round(fov * 3600 / PIX_ARCSEC)))
+    y0, x0 = (ny - n) // 2, (nx - n) // 2
+    frames = [(d, det, im[y0:y0 + n, x0:x0 + n]) for d, det, im in sky["frames"]]
+    out = dict(sky, frames=frames, shape=(n, n), size_deg=fov, wcs=sky["wcs"][y0:y0 + n, x0:x0 + n],
+               by_det=frames_by_detector(frames), diffs=diff_frames(frames))
+    return out
 
 
 def _sky_containing(ra: float, dec: float) -> dict | None:
@@ -264,6 +293,8 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
 
 
 _ANALYSES: "OrderedDict[tuple, dict]" = OrderedDict()
+TARGET_NAMES_EN = {"Звезда Барнарда": "Barnard's Star", "Эпсилон Индейца B": "Epsilon Indi B",
+                   "WISE 0855−0714": "WISE 0855−0714", "RW Возничего": "RW Aurigae", "R Дракона": "R Draconis"}
 
 
 def _analysis(sky: dict, coord: SkyCoord, online: bool = False) -> dict:
@@ -273,6 +304,28 @@ def _analysis(sky: dict, coord: SkyCoord, online: bool = False) -> dict:
         while len(_ANALYSES) > 64:
             _ANALYSES.popitem(last=False)
     return _ANALYSES[key]
+
+
+def _snap(sky: dict, coord: SkyCoord, radius_px: int = 2) -> SkyCoord:
+    """Притянуть клик к центру ближайшего источника (в кадре, где источник виден лучше всего)."""
+    x, y = (float(v) for v in sky["wcs"].world_to_pixel(coord))
+    best, best_peak = None, -np.inf
+    for det, items in sky["by_det"].items():
+        img = items[-1][1]
+        ny, nx = img.shape
+        ix, iy = int(round(x)), int(round(y))
+        if not (radius_px + 3 <= ix < nx - radius_px - 3 and radius_px + 3 <= iy < ny - radius_px - 3):
+            continue
+        cut = img[iy - radius_px:iy + radius_px + 1, ix - radius_px:ix + radius_px + 1]
+        v = img[np.isfinite(img)]
+        noise = 1.4826 * np.median(np.abs(v - np.median(v))) if v.size else np.inf
+        peak = (np.nanmax(fill_saturated(cut)) - np.median(v)) / noise if np.isfinite(cut).any() else -np.inf
+        if peak > best_peak:
+            best, best_peak = (det, img), peak
+    if best is None or best_peak < 5:
+        return coord
+    c = _centroid(best[1], x, y, search=radius_px)
+    return sky["wcs"].pixel_to_world(*c) if c is not None else coord
 
 
 @app.get("/api/object")
@@ -285,6 +338,7 @@ def obj(ra: float, dec: float):
         except SkyUnavailable as e:
             raise HTTPException(503, str(e))
 
+    coord = _snap(sky, coord)                         # клик -> центр ближайшего источника
     a = _analysis(sky, coord, online=False)          # движение, спектр (быстро, без сети)
     card, m, v = a["card"], a["motion"], a["variability"]
     if not card["catalog_found"]:
@@ -297,20 +351,28 @@ def obj(ra: float, dec: float):
     ratio = round(max(fl) / min(fl), 2) if len(fl) >= 2 else 1.0
 
     found = card["catalog_found"]
-    if found:
-        status = "known"
-    elif card["moving"]:
-        status = "candidate"
+    named = found and card.get("catalog_source") != "Gaia DR3"   # тестовый объект или SIMBAD
+    if card["moving"]:
+        status = "known" if found else "candidate"
+    elif named and (card.get("catalog_source", "").startswith("targets") or v.get("is_variable")):
+        status = "known"      # тестовые объекты и известные переменные
     else:
-        status = "star"
+        status = "star"       # неподвижная фоновая звезда (Gaia / SIMBAD / без совпадения)
     catalog = None
     if found:
-        parts = [card.get("catalog_source") or "", card.get("catalog_id") or card["name"], card.get("catalog_type") or ""]
-        catalog = " · ".join(p for p in parts if p)
+        src = card.get("catalog_source") or ""
+        if src.startswith("targets"):
+            from targets import TARGETS
+            t = next((t for t in TARGETS.values() if t["title"] == card["name"]), {})
+            catalog = t.get("catalog_en")
+            name_en = t.get("simbad")
+        if not catalog:
+            parts = [src, card.get("catalog_id") or card["name"], card.get("catalog_type") or ""]
+            catalog = " · ".join(p for p in parts if p)
 
     spd = card["speed_arcsec_yr"]
     return _clean({
-        "name": card["name"] if found else None,
+        "name": (TARGET_NAMES_EN.get(card["name"], card["name"])) if found else None,
         "status": status,
         "catalog": catalog,
         "motion": {

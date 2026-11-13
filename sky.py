@@ -105,6 +105,24 @@ def get_target(name: str, **kw) -> dict:
     return sky
 
 
+def _clip_spectrum(spec: dict, window: int = 15, k: float = 6.0) -> dict:
+    """Убрать одиночные выбросы (космические частицы, соседние звёзды): точка дальше k·σ
+    от медианы соседей по длине волны."""
+    import numpy as np
+    wl, fl, er = (np.asarray(spec[c], float) for c in ("wavelength", "flux", "error"))
+    if len(wl) < window:
+        return spec
+    keep = np.ones(len(wl), bool)
+    h = window // 2
+    for i in range(len(wl)):
+        nb = np.r_[fl[max(0, i - h):i], fl[i + 1:i + 1 + h]]
+        med = np.median(nb)
+        sig = 1.4826 * np.median(np.abs(nb - med)) or np.median(er) or 1e-9
+        keep[i] = abs(fl[i] - med) <= k * sig
+    return {"wavelength": wl[keep].round(4).tolist(), "flux": fl[keep].round(6).tolist(),
+            "error": er[keep].round(6).tolist()}
+
+
 def analyze(sky: dict, online: bool = False, valid_detectors=None, coord=None) -> dict:
     """Полный разбор объекта в центре: движение, переменность, спектр, молекулы, карточка.
 
@@ -122,7 +140,7 @@ def analyze(sky: dict, online: bool = False, valid_detectors=None, coord=None) -
     frames = good_frames(sky["frames"], sky.get("info"))   # без шумных кадров из 2–4 снимков
     motion = measure_motion(frames, coord, wcs)
     variability = measure_variability(frames, coord, wcs)
-    spec = get_spectrum(sky["cutouts"], coord.ra.deg, coord.dec.deg, valid_detectors=valid_detectors)
+    spec = _clip_spectrum(get_spectrum(sky["cutouts"], coord.ra.deg, coord.dec.deg, valid_detectors=valid_detectors))
     scores = molecule_scores(np.array(spec["wavelength"]), np.array(spec["flux"])) if spec["wavelength"] else {}
     card = who_is_it(coord, motion, scores, variability, online=online)
     if len(spec["wavelength"]) < 20:
