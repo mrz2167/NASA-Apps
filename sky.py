@@ -141,9 +141,16 @@ def analyze(sky: dict, online: bool = False, valid_detectors=None, coord=None) -
     motion = measure_motion(frames, coord, wcs)
     variability = measure_variability(frames, coord, wcs)
     spec = _clip_spectrum(get_spectrum(sky["cutouts"], coord.ra.deg, coord.dec.deg, valid_detectors=valid_detectors))
-    scores = molecule_scores(np.array(spec["wavelength"]), np.array(spec["flux"])) if spec["wavelength"] else {}
+    fl, er = np.array(spec["flux"]), np.array(spec["error"])
+    snr = float(np.median(fl / np.where(er > 0, er, np.inf))) if len(fl) else 0.0
+    spec_ok = len(fl) >= 20 and snr >= 3.0          # на шуме индексы молекул дают мусор
+    scores = (molecule_scores(np.array(spec["wavelength"]), fl) if spec_ok
+              else {"water": 0.0, "methane": 0.0, "co2": 0.0, "co": 0.0})
     card = who_is_it(coord, motion, scores, variability, online=online)
     if len(spec["wavelength"]) < 20:
         card["molecule_badges"] = (["Звезда слишком яркая: ядро пересвечено, спектр недоступен"]
                                    if variability.get("saturated") else ["Недостаточно точек спектра"])
+    elif not spec_ok:
+        card["molecule_badges"] = [f"Сигнал слишком слабый для химии (S/N≈{snr:.1f})"]
+    card["spectrum_snr"] = round(snr, 1)
     return dict(motion=motion, variability=variability, spectrum=spec, scores=scores, card=card)
