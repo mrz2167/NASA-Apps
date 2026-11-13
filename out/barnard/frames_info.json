@@ -1,0 +1,178 @@
+[
+ {
+  "date": "2025-08-27",
+  "detector": 1,
+  "n_exposures": 19,
+  "wavelength_um": 0.903734579891121,
+  "mjd_min": 60914.21253,
+  "mjd_max": 60923.107203
+ },
+ {
+  "date": "2025-09-30",
+  "detector": 1,
+  "n_exposures": 5,
+  "wavelength_um": 0.8426291469930174,
+  "mjd_min": 60948.585339,
+  "mjd_max": 60949.265914
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 1,
+  "n_exposures": 18,
+  "wavelength_um": 0.8937156935954983,
+  "mjd_min": 61110.091403,
+  "mjd_max": 61110.770379
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 1,
+  "n_exposures": 18,
+  "wavelength_um": 0.9036917021611057,
+  "mjd_min": 61275.959186,
+  "mjd_max": 61285.257036
+ },
+ {
+  "date": "2025-08-27",
+  "detector": 2,
+  "n_exposures": 18,
+  "wavelength_um": 1.3448629539170467,
+  "mjd_min": 60908.981929,
+  "mjd_max": 60917.67394
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 2,
+  "n_exposures": 18,
+  "wavelength_um": 1.3311665256866787,
+  "mjd_min": 61114.032003,
+  "mjd_max": 61121.228205
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 2,
+  "n_exposures": 25,
+  "wavelength_um": 1.4423700627635712,
+  "mjd_min": 61270.867116,
+  "mjd_max": 61305.628021
+ },
+ {
+  "date": "2025-08-27",
+  "detector": 3,
+  "n_exposures": 18,
+  "wavelength_um": 1.9835971412828197,
+  "mjd_min": 60902.864715,
+  "mjd_max": 60914.484085
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 3,
+  "n_exposures": 20,
+  "wavelength_um": 1.9447883288984207,
+  "mjd_min": 61118.309231,
+  "mjd_max": 61140.030061
+ },
+ {
+  "date": "2026-05-04",
+  "detector": 3,
+  "n_exposures": 4,
+  "wavelength_um": 2.1802458919298764,
+  "mjd_min": 61164.133134,
+  "mjd_max": 61165.082972
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 3,
+  "n_exposures": 17,
+  "wavelength_um": 1.9823658881234834,
+  "mjd_min": 61268.630812,
+  "mjd_max": 61272.906175
+ },
+ {
+  "date": "2025-08-27",
+  "detector": 4,
+  "n_exposures": 18,
+  "wavelength_um": 3.0559848043433355,
+  "mjd_min": 60914.21253,
+  "mjd_max": 60923.107203
+ },
+ {
+  "date": "2025-09-30",
+  "detector": 4,
+  "n_exposures": 5,
+  "wavelength_um": 2.780528846702273,
+  "mjd_min": 60948.58534,
+  "mjd_max": 60949.265914
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 4,
+  "n_exposures": 18,
+  "wavelength_um": 2.9769536463310313,
+  "mjd_min": 61110.091403,
+  "mjd_max": 61110.770379
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 4,
+  "n_exposures": 18,
+  "wavelength_um": 3.014078988211777,
+  "mjd_min": 61275.959186,
+  "mjd_max": 61285.257036
+ },
+ {
+  "date": "2025-08-27",
+  "detector": 5,
+  "n_exposures": 18,
+  "wavelength_um": 4.113426637046139,
+  "mjd_min": 60908.981929,
+  "mjd_max": 60917.67394
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 5,
+  "n_exposures": 19,
+  "wavelength_um": 4.08020491086946,
+  "mjd_min": 61114.032003,
+  "mjd_max": 61121.228205
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 5,
+  "n_exposures": 24,
+  "wavelength_um": 4.2018246150924465,
+  "mjd_min": 61270.867116,
+  "mjd_max": 61305.628021
+ },
+ {
+  "date": "2025-08-27",
+  "detector": 6,
+  "n_exposures": 17,
+  "wavelength_um": 4.715438913233109,
+  "mjd_min": 60902.864715,
+  "mjd_max": 60914.484085
+ },
+ {
+  "date": "2026-03-17",
+  "detector": 6,
+  "n_exposures": 20,
+  "wavelength_um": 4.669488047974948,
+  "mjd_min": 61118.309231,
+  "mjd_max": 61140.030061
+ },
+ {
+  "date": "2026-05-04",
+  "detector": 6,
+  "n_exposures": 4,
+  "wavelength_um": 4.841001542960306,
+  "mjd_min": 61164.133134,
+  "mjd_max": 61165.082972
+ },
+ {
+  "date": "2026-08-21",
+  "detector": 6,
+  "n_exposures": 17,
+  "wavelength_um": 4.697568732703238,
+  "mjd_min": 61268.630812,
+  "mjd_max": 61272.906175
+ }
+]
