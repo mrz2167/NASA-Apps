@@ -37,6 +37,8 @@ frames = build_frames(cutouts, coord, 0.1)
 wcs, shape = make_target_wcs(coord, 0.1)
 ```
 
+**Готовый кэш** (чтобы не качать заново): [Google Drive](https://drive.google.com/drive/folders/1ODZE-CC1bClYx-5pgoSHZX4qoegocZFu?usp=sharing) → скачать `cache_*.zip` и распаковать в корень репозитория, чтобы получилась папка `cache/`.
+
 Проверка целиком: `python check_data.py` → `out/wise0855/frames.png`, `blink_D*.gif`, `frames.npz`.
 
 ### Что важно знать остальным
