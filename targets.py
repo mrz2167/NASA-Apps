@@ -82,3 +82,11 @@ def coord_at(name: str, when: str | None = None) -> SkyCoord:
                  pm_ra_cosdec=t["pmra"] * u.mas / u.yr, pm_dec=t["pmdec"] * u.mas / u.yr,
                  distance=(1000 / t["parallax"]) * u.pc, obstime=Time(t["epoch"], format="jyear"))
     return c.apply_space_motion(new_obstime=Time(when))
+
+
+def predicted_track(name: str, dates=None):
+    """Где объект должен быть по каталогу (для следа на анимации).
+    dates=None -> функция date -> SkyCoord (её можно передать прямо в render: track=predicted_track("barnard"))."""
+    if dates is None:
+        return lambda d: coord_at(name, d)
+    return [coord_at(name, d) for d in dates]
