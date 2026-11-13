@@ -11,6 +11,25 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Бэкенд для сайта (LUMEN Skywatch): `main.py` по контракту [API.md](API.md)
+
+```
+pip install -r requirements.txt
+uvicorn main:app --port 8077          # порт любой свободный
+```
+В `index.html`: `const CONFIG = { API_BASE: "http://localhost:8077", PIX_ARCSEC: 6.15 };`
+
+| Эндпоинт | Что отдаёт |
+|---|---|
+| `GET /api/frames?ra&dec&fov&detector` | PNG по эпохам (asinh, север вверх), разности (янтарный/синий), `sources` с именами Gaia DR3, `target.positions` и `molecules` |
+| `GET /api/object?ra&dec` | имя, `status` (known/candidate/star), каталог, движение ± ошибка и каталожное, переменность, молекулы, спектр, вердикт |
+| `GET /api/health` | проверка |
+
+- Сначала берётся полный набор снимков из `cache/`, если его нет — быстрый режим из архива (~2 мин на новое место), если архив лёг — что есть в кэше.
+- При первом запросе кадров в фоне грузится Gaia DR3 для всего поля (~20 с, кэш `cache/gaia/`), дальше клики по звёздам сверяются мгновенно.
+- Проверено на 5 объектах NASA: `/api/frames` 10–18 с первый раз, `/api/object` ~2 с.
+- Расширения к контракту (фронтенд может игнорировать): `meta`, `motion.arcsec_per_yr_err`, `motion.significant`, `variability.label`, `verdict`, `simbad_url`.
+
 ## Для сайта (Питонист 4): одна функция `get_sky`
 
 ```python

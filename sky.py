@@ -105,11 +105,12 @@ def get_target(name: str, **kw) -> dict:
     return sky
 
 
-def analyze(sky: dict, online: bool = False, valid_detectors=None) -> dict:
+def analyze(sky: dict, online: bool = False, valid_detectors=None, coord=None) -> dict:
     """Полный разбор объекта в центре: движение, переменность, спектр, молекулы, карточка.
 
     online=False — сверка с каталогами только по тестовым объектам (быстро, без сети);
     online=True  — ещё SIMBAD (зеркало) и Gaia.
+    coord — разобрать не центр, а другую точку кадра (например, куда кликнул пользователь).
     Возвращает {"motion", "variability", "spectrum", "scores", "card"}.
     """
     from identify import measure_motion, measure_variability, who_is_it
@@ -117,7 +118,7 @@ def analyze(sky: dict, online: bool = False, valid_detectors=None) -> dict:
     import numpy as np
 
     from epochs import good_frames
-    coord, wcs = sky["coord"], sky["wcs"]
+    coord, wcs = (coord if coord is not None else sky["coord"]), sky["wcs"]
     frames = good_frames(sky["frames"], sky.get("info"))   # без шумных кадров из 2–4 снимков
     motion = measure_motion(frames, coord, wcs)
     variability = measure_variability(frames, coord, wcs)

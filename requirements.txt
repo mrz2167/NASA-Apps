@@ -6,3 +6,7 @@ reproject
 photutils
 streamlit
 imageio
+fastapi
+uvicorn
+requests
+scipy

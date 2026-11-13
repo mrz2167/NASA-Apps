@@ -377,14 +377,43 @@ def _simbad_link(coord: SkyCoord, radius_arcsec: float) -> str:
             f"&Radius={radius_arcsec:g}&Radius.unit=arcsec")
 
 
+def gaia_cone(coord: SkyCoord, radius_arcsec: float, top: int = 1000, gmax: float = 20.5):
+    """Gaia DR3 в круге (через архив IRSA — он у нас работает стабильно; ~20 с на запрос)."""
+    from astroquery.ipac.irsa import Irsa
+    q = (f"SELECT TOP {top} source_id, ra, dec, phot_g_mean_mag, pmra, pmdec FROM gaia_dr3_source "
+         f"WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{coord.ra.deg},{coord.dec.deg},{radius_arcsec / 3600}))"
+         f" AND phot_g_mean_mag < {gmax} ORDER BY phot_g_mean_mag")
+    return Irsa.query_tap(q).to_table()
+
+
+def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0) -> dict | None:
+    """Самая яркая звезда Gaia в радиусе из заранее загруженной таблицы поля."""
+    if table is None or len(table) == 0:
+        return None
+    cat = SkyCoord(np.asarray(table["ra"], float), np.asarray(table["dec"], float), unit="deg")
+    sep = coord.separation(cat).arcsec
+    idx = np.where(sep < radius_arcsec)[0]
+    if not len(idx):
+        return None
+    i = idx[np.argmin(np.asarray(table["phot_g_mean_mag"], float)[idx])]
+    r = table[i]
+    pmra, pmdec = float(r["pmra"]), float(r["pmdec"])
+    pm = float(np.hypot(pmra, pmdec)) / 1000 if np.isfinite(pmra) and np.isfinite(pmdec) else None
+    sid = int(r["source_id"])
+    return {"found": True, "name": f"Gaia DR3 {sid}", "catalog_id": f"Gaia DR3 {sid}",
+            "otype": f"звезда, G={float(r['phot_g_mean_mag']):.1f}", "source": "Gaia DR3",
+            "pm_arcsec_yr": round(pm, 3) if pm else None, "simbad_url": _simbad_link(coord, 15.0)}
+
+
 def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True) -> dict:
     """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3."""
     info = {"found": False, "name": "Неизвестный объект", "otype": "", "source": None,
-            "simbad_url": _simbad_link(coord, radius_arcsec)}
+            "simbad_url": _simbad_link(coord, radius_arcsec), "pm_arcsec_yr": None, "catalog_id": None}
 
     for key, t in TARGETS.items():
         if coord.separation(coord_at(key, "2026-01-01")).arcsec < 30.0:
-            info.update(found=True, name=t["title"], otype=t["kind"], source="targets (Gaia DR3/SIMBAD)")
+            info.update(found=True, name=t["title"], otype=t["kind"], source="targets (Gaia DR3/SIMBAD)",
+                        catalog_id=t["simbad"], pm_arcsec_yr=round(float(np.hypot(t["pmra"], t["pmdec"])) / 1000, 2))
             return info
     if not online:
         return info
@@ -395,31 +424,38 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
         res = s.query_region(coord, radius=radius_arcsec * u.arcsec)
         if res is not None and len(res) > 0:
             cols = {c.lower(): c for c in res.colnames}
-            info.update(found=True, name=str(res[0][cols.get("main_id", res.colnames[0])]).strip(),
-                        otype=str(res[0][cols["otype"]]).strip() if "otype" in cols else "", source="SIMBAD")
+            r0 = res[0]
+            name = str(r0[cols.get("main_id", res.colnames[0])]).strip()
+            pm = None
+            try:
+                pm = round(float(np.hypot(float(r0[cols["pmra"]]), float(r0[cols["pmdec"]]))) / 1000, 2)
+                pm = pm if np.isfinite(pm) else None
+            except Exception:
+                pass
+            info.update(found=True, name=name, catalog_id=name, pm_arcsec_yr=pm,
+                        otype=str(r0[cols["otype"]]).strip() if "otype" in cols else "", source="SIMBAD")
             return info
     except Exception:
         pass
 
     try:
-        import requests
-        q = (f"SELECT TOP 1 source_id, phot_g_mean_mag FROM gaiadr3.gaia_source WHERE 1=CONTAINS("
-             f"POINT('ICRS',ra,dec),CIRCLE('ICRS',{coord.ra.deg},{coord.dec.deg},{radius_arcsec / 3600}))"
-             f" ORDER BY phot_g_mean_mag")
-        r = requests.post("https://gaia.ari.uni-heidelberg.de/tap/sync",
-                          data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": q}, timeout=30)
-        lines = r.text.strip().splitlines()
-        if r.ok and len(lines) > 1:
-            sid = lines[1].split(",")[0]
-            info.update(found=True, name=f"Gaia DR3 {sid}", otype="звезда (Gaia)", source="Gaia DR3")
+        t = gaia_cone(coord, radius_arcsec, top=1)
+        if t is not None and len(t):
+            m = match_gaia(coord, t, radius_arcsec)
+            if m:
+                info.update(m)
     except Exception:
         pass
     return info
 
 
-def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, online: bool = True) -> dict:
-    """Карточка «Кто это?» по простым правилам (см. план)."""
-    cat = _check_catalogs(coord, online=online)
+def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, online: bool = True,
+              cat: dict | None = None) -> dict:
+    """Карточка «Кто это?» по простым правилам (см. план). cat — готовый результат сверки с каталогами."""
+    if cat is None:
+        cat = _check_catalogs(coord, online=online)
+    cat = dict({"found": False, "name": "Неизвестный объект", "otype": "", "source": None,
+                "simbad_url": _simbad_link(coord, 15.0), "pm_arcsec_yr": None, "catalog_id": None}, **cat)
     motion = motion or {}
     speed = motion.get("speed_arcsec_yr", 0.0) or 0.0
     err = motion.get("speed_err_arcsec_yr", float("nan"))
@@ -445,9 +481,11 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     elif is_var:
         verdict = "Переменная звезда (меняет яркость, но стоит на месте)"
     elif not cat["found"]:
-        verdict = "Кандидат: нужна проверка (совпадений в каталогах нет)"
+        verdict = "Неподвижный источник, в каталогах не найден"
     else:
         verdict = f"Известный неподвижный источник ({cat['otype'] or 'звезда/галактика'})"
+    if moving and not cat["found"] and n_ep > 1 and speed <= 60.0:
+        verdict += " — в каталогах нет: КАНДИДАТ, нужна проверка"
 
     names = {"water": "Вода (H₂O)", "methane": "Метан (CH₄)", "co2": "CO₂", "co": "CO"}
     badges = [f"{lab}: {scores[k]:.2f}" for k, lab in names.items()
@@ -455,7 +493,8 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     speed_txt = (f"{speed:.1f} ± {err:.1f}″/год" if np.isfinite(err) else f"{speed:.1f}″/год")
     return {
         "name": cat["name"], "catalog_found": cat["found"], "catalog_type": cat["otype"],
-        "catalog_source": cat["source"],
+        "catalog_source": cat["source"], "catalog_id": cat["catalog_id"],
+        "catalog_pm_arcsec_yr": cat["pm_arcsec_yr"],
         "speed_arcsec_yr": speed, "speed_err_arcsec_yr": err, "speed_text": speed_txt,
         "direction_deg": motion.get("direction_deg", 0.0), "moving": bool(moving),
         "variability": var_label,
