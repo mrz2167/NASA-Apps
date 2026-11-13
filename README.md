@@ -11,6 +11,17 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Docker (рекомендуется)
+
+```
+docker compose up -d --build       # http://localhost:8077/
+docker compose logs -f             # логи
+docker compose down                # остановить
+```
+- В образ запечён `cache/` пяти тестовых объектов (~200 МБ, образ ~1,7 ГБ): демо работает без архива NASA.
+- `docker-compose.yml` подключает `./cache` томом — новые места неба сохраняются между перезапусками.
+- Для хостинга (Railway/Render/Fly): тот же `Dockerfile`, порт берётся из `$PORT`. Перед сборкой положите `cache/` из архива на Drive.
+
 ## Запуск сайта целиком
 
 ```

@@ -1,0 +1,12 @@
+# docker compose up -d --build   ->  http://localhost:8077/
+services:
+  skywatch:
+    build: .
+    image: skywatch:latest
+    container_name: skywatch
+    ports:
+      - "8077:8000"
+    volumes:
+      # новые места неба, скачанные из архива, сохраняются между перезапусками
+      - ./cache:/app/cache
+    restart: unless-stopped
