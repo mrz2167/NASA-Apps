@@ -59,18 +59,44 @@ def _tap(query: str, retries: int = 3) -> Table:
             _time.sleep(10 * (attempt + 1))
 
 
-def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = True) -> Table:
+NEAR_ARCSEC = 3.0  # запрос в пределах 3″ от закэшированного центра берётся из кэша
+
+
+def _cached_query(coord: SkyCoord, size_deg: float) -> Path | None:
+    """Ближайший закэшированный запрос с тем же размером вырезки в пределах NEAR_ARCSEC."""
+    best, best_sep = None, NEAR_ARCSEC
+    for f in (CACHE / "queries").glob("*.ecsv"):
+        try:
+            meta = Table.read(f).meta
+            if abs(float(meta["size_deg"]) - size_deg) > 1e-9:
+                continue
+            sep = coord.separation(SkyCoord(meta["ra"], meta["dec"], unit="deg")).arcsec
+        except Exception:
+            continue
+        if sep <= best_sep:
+            best, best_sep = f, sep
+    return best
+
+
+def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = True,
+                offline: bool = False) -> Table:
     """Все снимки SPHEREx, накрывающие точку (ra, dec), отсортированные по времени.
 
     Столбцы: url (ссылка на вырезку size_deg вокруг точки), obs_id, release (dr1/qr3),
     time (MJD начала экспозиции), detector (1..6), wl_min_um / wl_max_um (диапазон детектора).
     Одна экспозиция из разных релизов остаётся одна (приоритет dr1 > qr3).
+    Если в кэше есть запрос с центром в пределах 3″ — берётся он (ссылки на вырезки — с его центром).
+    offline=True — только кэш; нет кэша -> FileNotFoundError.
     """
     coord = SkyCoord(ra, dec, unit="deg")
     ra, dec = round(coord.ra.deg, 6), round(coord.dec.deg, 6)
     cache_file = CACHE / "queries" / f"{_key(ra, dec, size_deg)}.ecsv"
-    if use_cache and cache_file.exists():
-        return Table.read(cache_file)
+    if use_cache:
+        hit = cache_file if cache_file.exists() else _cached_query(coord, size_deg)
+        if hit is not None:
+            return Table.read(hit)
+    if offline:
+        raise FileNotFoundError(f"нет кэша для RA={ra} Dec={dec} size={size_deg}")
 
     query = f"""
     SELECT a.uri, p.time_bounds_lower, p.energy_bandpassname,
@@ -171,12 +197,17 @@ def load_cutout(url: str, time: float | None = None, retries: int = 3) -> dict:
         }
 
 
-def load_cutouts(table: Table, max_workers: int = 8, progress: bool = True) -> list[dict]:
+def load_cutouts(table: Table, max_workers: int = 8, progress: bool = True,
+                 on_progress=None, offline: bool = False) -> list[dict]:
     """Загрузить все вырезки из таблицы find_images (параллельно, через кэш).
 
     Вырезки, которые не скачались после повторов, пропускаются с предупреждением.
+    on_progress(i, n) — колбэк для прогресс-бара (например, в Streamlit).
+    offline=True — брать только то, что уже лежит в cache/, без сети.
     """
     def one(row):
+        if offline and not cutout_path(row["url"]).exists():
+            return None
         try:
             return load_cutout(row["url"], time=row["time"])
         except Exception as e:  # сеть/архив: не роняем всю загрузку
@@ -190,6 +221,8 @@ def load_cutouts(table: Table, max_workers: int = 8, progress: bool = True) -> l
                 out.append(c)
             if progress and (i % 25 == 0 or i == n):
                 print(f"  вырезки: {i}/{n}")
+            if on_progress is not None:
+                on_progress(i, n)
     return out
 
 
