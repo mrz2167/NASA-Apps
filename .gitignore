@@ -224,3 +224,4 @@ cache/
 scratch/
 *.zip
 logs/
+test_pipeline.py
