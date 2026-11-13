@@ -31,6 +31,7 @@ TARGETS = {
         title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", kind="самый холодный известный коричневый карлик",
         gaia_dr3=None, ra=133.81890825, dec=-7.247048,
         pmra=-8123.7, pmdec=673.2, parallax=439.0, epoch=2000.0,
+        when="2026-01-01",  # под эту дату скачан кэш (центр вырезки)
     ),
     "rw_aur": dict(
         title="RW Возничего", simbad="RW Aur", kind="молодая переменная звезда (тип T Тельца)",
@@ -72,9 +73,11 @@ def simbad_coord(name: str, when: str = DEFAULT_WHEN) -> SkyCoord:
     return c.apply_space_motion(new_obstime=Time(when))
 
 
-def coord_at(name: str, when: str = DEFAULT_WHEN) -> SkyCoord:
-    """Координаты объекта на дату when с учётом собственного движения."""
+def coord_at(name: str, when: str | None = None) -> SkyCoord:
+    """Координаты объекта на дату when с учётом собственного движения.
+    По умолчанию — дата, под которую скачан кэш (центр вырезки)."""
     t = TARGETS[name]
+    when = when or t.get("when", DEFAULT_WHEN)
     c = SkyCoord(ra=t["ra"] * u.deg, dec=t["dec"] * u.deg,
                  pm_ra_cosdec=t["pmra"] * u.mas / u.yr, pm_dec=t["pmdec"] * u.mas / u.yr,
                  distance=(1000 / t["parallax"]) * u.pc, obstime=Time(t["epoch"], format="jyear"))

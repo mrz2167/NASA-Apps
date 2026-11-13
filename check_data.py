@@ -94,7 +94,7 @@ def main():
     ap.add_argument("--size", type=float, default=0.1)
     ap.add_argument("--per-group", type=int, default=None,
                     help="не больше N снимков на (эпоху, детектор) — быстрый режим")
-    ap.add_argument("--when", default=DEFAULT_WHEN, help="дата для сдвига на собственное движение")
+    ap.add_argument("--when", default=None, help="дата для сдвига на собственное движение")
     a = ap.parse_args()
 
     if a.ra is not None:

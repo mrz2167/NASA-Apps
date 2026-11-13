@@ -11,6 +11,34 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Для сайта (Питонист 4): одна функция `get_sky`
+
+```python
+from sky import get_sky, get_target, SkyUnavailable
+
+try:
+    sky = get_sky(ra, dec, quick=True, on_progress=lambda i, n: bar.progress(i / n))
+except SkyUnavailable as e:
+    st.error(str(e))
+
+sky = get_target("barnard")          # тестовые объекты: barnard, eps_ind_b, wise0855, rw_aur, r_dra
+```
+
+| Ключ | Что внутри |
+|---|---|
+| `frames` | `[(дата, детектор, 2D)]` — кадры для мигания |
+| `by_det` | `{детектор: [(дата, кадр)]}` |
+| `info` | подписи кадров: `date, detector, n_exposures, wavelength_um` |
+| `diffs` | «что изменилось»: `[(дата, детектор, 2D)]` |
+| `wcs`, `shape`, `coord` | общая сетка кадров и центр |
+| `cutouts` | исходные вырезки — для спектра (Питонист 2) |
+| `source` | `"archive"` или `"cache"` |
+| `warnings` | строки для показа пользователю |
+
+- `quick=True` (по умолчанию): ≤ 3 снимка на (эпоху, детектор), ~50 вырезок. Повторный запрос того же места — мгновенно из кэша (центр может отличаться до 3″).
+- `offline=True`: только кэш, без сети — запасной вариант на демо.
+- Архив не отвечает и кэша нет → `SkyUnavailable` с понятным текстом.
+
 ## Данные (Питонист 1) — готово
 
 | Файл | Функция | Что делает |
