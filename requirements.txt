@@ -1,0 +1,8 @@
+astropy>=7.0
+astroquery>=0.4.10
+numpy
+matplotlib
+reproject
+photutils
+streamlit
+imageio
