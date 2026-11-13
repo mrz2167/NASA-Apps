@@ -14,27 +14,52 @@ BANDS = {
 }
 
 
-def measure_flux(image: np.ndarray, x: float, y: float, r: float = 2.0, r_in: float = 4.0, r_out: float = 6.0) -> float:
-    """Апертурная фотометрия: сумма в кружке радиусом r минус медианный фон из кольца [r_in, r_out]."""
+def measure_flux(
+    image: np.ndarray,
+    x: float,
+    y: float,
+    variance: np.ndarray | None = None,
+    r: float = 2.0,
+    r_in: float = 4.0,
+    r_out: float = 6.0,
+) -> tuple[float, float]:
+    """Апертурная фотометрия: возвращает (поток, погрешность) в кружке радиусом r с вычетом фона кольца."""
     ap = CircularAperture((x, y), r=r)
     an = CircularAnnulus((x, y), r_in=r_in, r_out=r_out)
     bkg_vals = an.to_mask(method="center").get_values(image)
-    bkg = np.nanmedian(bkg_vals)
-    total = aperture_photometry(image, ap)["aperture_sum"][0]
-    return float(total - bkg * ap.area)
+    bkg = float(np.nanmedian(bkg_vals))
+    total = float(aperture_photometry(image, ap)["aperture_sum"][0])
+    flux = total - bkg * ap.area
+
+    if variance is not None and np.any(np.isfinite(variance)):
+        var_sum = float(aperture_photometry(np.nan_to_num(variance, nan=0.0), ap)["aperture_sum"][0])
+        err = float(np.sqrt(max(var_sum, 0.0)))
+    else:
+        # Оценка шума по разбросу фона в кольце, если слой variance отсутствует
+        bkg_std = float(np.nanstd(bkg_vals))
+        err = float(bkg_std * np.sqrt(ap.area)) if np.isfinite(bkg_std) else 0.01
+
+    return float(flux), float(err)
 
 
-def extract_spectrum(cutouts: list[dict], ra: float, dec: float) -> tuple[np.ndarray, np.ndarray]:
+def extract_spectrum_with_errors(
+    cutouts: list[dict], ra: float, dec: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Собирает спектр (длина волны в мкм, поток) по списку вырезок из data.load_cutouts().
+    Собирает спектр (длина волны в мкм, поток, погрешность) по списку вырезок из data.load_cutouts().
     """
     wavelengths: list[float] = []
     fluxes: list[float] = []
+    errors: list[float] = []
 
     for c in cutouts:
         img = c["image"].astype(np.float64)
         if c.get("zodi") is not None:
             img = img - c["zodi"].astype(np.float64)
+
+        var = c.get("variance")
+        if var is not None:
+            var = var.astype(np.float64)
 
         x_raw, y_raw = c["wcs"].world_to_pixel_values(ra, dec)
         x, y = float(x_raw), float(y_raw)
@@ -48,25 +73,48 @@ def extract_spectrum(cutouts: list[dict], ra: float, dec: float) -> tuple[np.nda
         if not np.isfinite(img[iy, ix]):
             continue
 
-        # Проверяем центральный пиксель на критические ошибки (NaN / сбойные биты)
         if "flags" in c and c["flags"] is not None:
             mask = bad_pixels(c)
             if mask[iy, ix]:
                 continue
 
-        flux = measure_flux(img, x, y)
+        flux, err = measure_flux(img, x, y, variance=var)
         wl_raw, _ = c["spectral_wcs"].pixel_to_world(x, y)
         wl = float(wl_raw.to_value("um")) if hasattr(wl_raw, "to_value") else float(wl_raw)
 
         if np.isfinite(flux) and np.isfinite(wl):
             wavelengths.append(wl)
             fluxes.append(flux)
+            errors.append(err if np.isfinite(err) else 0.01)
 
     if not wavelengths:
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([])
 
     order = np.argsort(wavelengths)
-    return np.array(wavelengths)[order], np.array(fluxes)[order]
+    return (
+        np.array(wavelengths)[order],
+        np.array(fluxes)[order],
+        np.array(errors)[order],
+    )
+
+
+def extract_spectrum(cutouts: list[dict], ra: float, dec: float) -> tuple[np.ndarray, np.ndarray]:
+    """Обратная совместимость: возвращает (wavelength, flux)."""
+    wl, flux, _ = extract_spectrum_with_errors(cutouts, ra, dec)
+    return wl, flux
+
+
+def get_spectrum(cutouts: list[dict], ra: float, dec: float) -> dict[str, list[float]]:
+    """
+    Формат строго по контракту API.md для эндпоинта GET /api/object:
+    {"wavelength": [...], "flux": [...], "error": [...]}
+    """
+    wl, flux, err = extract_spectrum_with_errors(cutouts, ra, dec)
+    return {
+        "wavelength": [round(float(v), 4) for v in wl],
+        "flux": [round(float(v), 6) for v in flux],
+        "error": [round(float(v), 6) for v in err],
+    }
 
 
 def bin_spectrum(wl: np.ndarray, flux: np.ndarray, bin_width: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
@@ -84,7 +132,10 @@ def bin_spectrum(wl: np.ndarray, flux: np.ndarray, bin_width: float = 0.05) -> t
 
 
 def molecule_scores(wl: np.ndarray, flux: np.ndarray) -> dict[str, float]:
-    """Считает глубину провалов поглощения: 1 - (поток в окне / поток континуума)."""
+    """
+    Считает индекс поглощения 0..1 по контракту API.md (без NaN, чтобы не ломать JSON):
+    {"water": ..., "methane": ..., "co2": ..., "co": ...}
+    """
     wl = np.asarray(wl)
     flux = np.asarray(flux)
     scores: dict[str, float] = {}
@@ -98,9 +149,10 @@ def molecule_scores(wl: np.ndarray, flux: np.ndarray) -> dict[str, float]:
         cont = np.nanmedian(np.concatenate(cont_parts)) if cont_parts else np.nan
 
         if np.isfinite(cont) and cont > 0 and np.isfinite(inband):
-            scores[name] = float(1.0 - inband / cont)
+            val = float(np.clip(1.0 - inband / cont, 0.0, 1.0))
+            scores[name] = round(val, 3)
         else:
-            scores[name] = np.nan
+            scores[name] = 0.0
 
     return scores
 
@@ -109,33 +161,14 @@ if __name__ == "__main__":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
 
-    import matplotlib.pyplot as plt
     from data import find_images, load_cutouts
 
-    # Главный целевой объект проекта: коричневый карлик WISE 0855-0714 (эпоха 2025-2026)
     RA, DEC = 133.768, -7.239
-    print("Ищем снимки SPHEREx для WISE 0855...")
     tbl = find_images(RA, DEC, size_deg=0.05)
-    print(f"Найдено экспозиций: {len(tbl)}")
-
     cutouts = load_cutouts(tbl[:80])
-    wl, flux = extract_spectrum(cutouts, RA, DEC)
-    scores = molecule_scores(wl, flux)
 
-    print(f"Собрано валидных точек спектра: {len(wl)}")
-    print("Индексы молекул:", scores)
+    spec_json = get_spectrum(cutouts, RA, DEC)
+    mol_json = molecule_scores(np.array(spec_json["wavelength"]), np.array(spec_json["flux"]))
 
-    if len(wl) > 0:
-        bw, bf = bin_spectrum(wl, flux, bin_width=0.1)
-        plt.figure(figsize=(9, 4))
-        plt.scatter(wl, flux, s=14, alpha=0.5, label="Отдельные вырезки")
-        plt.plot(bw, bf, color="#1f4e78", linewidth=2, label="Усреднённый спектр")
-        plt.axvspan(2.8, 3.1, color="cyan", alpha=0.2, label="Вода (3.0 мкм)")
-        plt.axvspan(3.2, 3.4, color="orange", alpha=0.2, label="Метан (3.3 мкм)")
-        plt.xlabel("Длина волны (мкм)")
-        plt.ylabel("Поток (МЯн/ср · пикс²)")
-        plt.title("Реальный спектр SPHEREx: WISE 0855-0714")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+    print("Точек в API-ответе:", len(spec_json["wavelength"]))
+    print("Молекулы (API):", mol_json)
