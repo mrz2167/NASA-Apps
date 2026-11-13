@@ -103,3 +103,28 @@ def get_target(name: str, **kw) -> dict:
     sky = get_sky(c.ra.deg, c.dec.deg, **kw)
     sky["target"] = dict(TARGETS[name], key=name)
     return sky
+
+
+def analyze(sky: dict, online: bool = False, valid_detectors=None) -> dict:
+    """Полный разбор объекта в центре: движение, переменность, спектр, молекулы, карточка.
+
+    online=False — сверка с каталогами только по тестовым объектам (быстро, без сети);
+    online=True  — ещё SIMBAD (зеркало) и Gaia.
+    Возвращает {"motion", "variability", "spectrum", "scores", "card"}.
+    """
+    from identify import measure_motion, measure_variability, who_is_it
+    from spectrum import get_spectrum, molecule_scores
+    import numpy as np
+
+    from epochs import good_frames
+    coord, wcs = sky["coord"], sky["wcs"]
+    frames = good_frames(sky["frames"], sky.get("info"))   # без шумных кадров из 2–4 снимков
+    motion = measure_motion(frames, coord, wcs)
+    variability = measure_variability(frames, coord, wcs)
+    spec = get_spectrum(sky["cutouts"], coord.ra.deg, coord.dec.deg, valid_detectors=valid_detectors)
+    scores = molecule_scores(np.array(spec["wavelength"]), np.array(spec["flux"])) if spec["wavelength"] else {}
+    card = who_is_it(coord, motion, scores, variability, online=online)
+    if len(spec["wavelength"]) < 20:
+        card["molecule_badges"] = (["Звезда слишком яркая: ядро пересвечено, спектр недоступен"]
+                                   if variability.get("saturated") else ["Недостаточно точек спектра"])
+    return dict(motion=motion, variability=variability, spectrum=spec, scores=scores, card=card)

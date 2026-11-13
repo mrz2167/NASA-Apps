@@ -1,332 +1,464 @@
-import json
+"""Координаты, движение, переменность и карточка «Кто это?» (Питонист 3).
+
+    now_coord(name, when)                         -> SkyCoord на дату
+    measure_motion(frames, coord, target_wcs)     -> скорость ″/год, направление, ошибка, положения
+    measure_variability(frames, coord, target_wcs)-> размах яркости, метка
+    who_is_it(coord, motion, scores, variability) -> карточка для интерфейса
+
+frames — формат epochs.build_frames: [(дата, детектор, 2D)], target_wcs — epochs.make_target_wcs.
+"""
+from __future__ import annotations
+
 import numpy as np
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.wcs import WCS
-from astroquery.simbad import Simbad
-from astroquery.gaia import Gaia
-from photutils.centroids import centroid_com
 from photutils.aperture import CircularAperture, CircularAnnulus, aperture_photometry
 
-# Известные параметры тестовых объектов на случай, если сервер SIMBAD упадет во время хакатона
-FALLBACK_OBJECTS = {
-    "WISE 0855": {"ra": 133.795134, "dec": -7.245147, "pmra": 0.0, "pmdec": 0.0},
-    "BARNARD'S STAR": {"ra": 269.452077, "dec": 4.693365, "pmra": -801.55, "pmdec": 10362.39},
-    "RW AURIGAE": {"ra": 76.956533, "dec": 30.401441, "pmra": 4.66, "pmdec": -24.18},
-    "R DRACONIS": {"ra": 248.165658, "dec": 66.754472, "pmra": -21.05, "pmdec": -17.34},
+from targets import TARGETS, coord_at, simbad, simbad_coord
+
+PIX_ARCSEC = 6.15
+SIMBAD_MIRROR = "https://simbad.harvard.edu/simbad/sim-coo"
+
+# Имена тестовых объектов в любом написании -> ключ targets.TARGETS
+ALIASES = {
+    "WISE 0855": "wise0855", "WISE0855": "wise0855", "WISE 0855-0714": "wise0855",
+    "WISE J085510.83-071442.5": "wise0855",
+    "BARNARD'S STAR": "barnard", "BARNARD": "barnard", "BARNARDS STAR": "barnard",
+    "EPS IND B": "eps_ind_b", "EPSILON INDI B": "eps_ind_b", "ε IND B": "eps_ind_b",
+    "RW AUR": "rw_aur", "RW AURIGAE": "rw_aur",
+    "R DRA": "r_dra", "R DRACONIS": "r_dra",
 }
+# Для совместимости со старым кодом: имена тестовых объектов
+FALLBACK_OBJECTS = {k: TARGETS[v] for k, v in ALIASES.items()}
+
+
+def _target_key(name: str) -> str | None:
+    n = name.strip().upper()
+    if n.lower() in TARGETS:
+        return n.lower()
+    if n in ALIASES:
+        return ALIASES[n]
+    if "0855" in n:
+        return "wise0855"
+    return None
 
 
 def now_coord(name: str, when: str = "2026-01-01") -> SkyCoord:
-    clean_name = name.strip().upper()
-    if "0855" in clean_name:
-        return SkyCoord(ra=133.795134 * u.deg, dec=-7.245147 * u.deg, frame="icrs")
+    """Координаты объекта на дату when с учётом собственного движения.
 
+    Тестовые объекты — из targets.py (Gaia DR3 / литература, работает без сети);
+    остальные — из SIMBAD (зеркало Гарварда); в крайнем случае — Sesame без движения.
+    """
+    key = _target_key(name)
+    if key is not None:
+        return coord_at(key, when)
     try:
-        s = Simbad()
-        # Используем зеркало Гарварда, так как CDS часто падает (ответ на 3-й баг)
-        s.SIMBAD_URL = "https://simbad.harvard.edu/simbad/sim-script"
-        s.TAP_URL = "https://simbad.harvard.edu/simbad/sim-tap"
-        s.add_votable_fields("pmra", "pmdec")
-        
-        result = s.query_object(name)
-        if result is None or len(result) == 0:
-            raise ValueError(f"Объект '{name}' не найден в каталоге SIMBAD.")
-
-        cols = {col.lower(): col for col in result.colnames}
-        row = result[0]
-        ra_val, dec_val = row[cols["ra"]], row[cols["dec"]]
-
-        if isinstance(ra_val, str):
-            base_coord = SkyCoord(ra_val, dec_val, unit=(u.hourangle, u.deg), frame="icrs")
-            ra_deg, dec_deg = base_coord.ra.deg, base_coord.dec.deg
-        else:
-            ra_deg, dec_deg = float(ra_val), float(dec_val)
-
-        pmra_raw, pmdec_raw = row[cols["pmra"]], row[cols["pmdec"]]
-        pmra = float(pmra_raw) if pmra_raw is not None and str(pmra_raw) != "--" else 0.0
-        pmdec = float(pmdec_raw) if pmdec_raw is not None and str(pmdec_raw) != "--" else 0.0
-
+        return simbad_coord(name, when)
     except Exception as e:
-        if clean_name in FALLBACK_OBJECTS:
-            data = FALLBACK_OBJECTS[clean_name]
-            ra_deg, dec_deg, pmra, pmdec = data["ra"], data["dec"], data["pmra"], data["pmdec"]
-        else:
-            try:
-                return SkyCoord.from_name(name)
-            except Exception:
-                raise RuntimeError(f"Не удалось получить координаты для '{name}': {e}")
-
-    c = SkyCoord(
-        ra=ra_deg * u.deg, dec=dec_deg * u.deg,
-        pm_ra_cosdec=pmra * u.mas / u.yr, pm_dec=pmdec * u.mas / u.yr,
-        obstime=Time("J2000")
-    )
-    return c.apply_space_motion(new_obstime=Time(when))
+        try:
+            return SkyCoord.from_name(name)  # без собственного движения
+        except Exception:
+            raise RuntimeError(f"Не удалось получить координаты для '{name}': {e}")
 
 
-def _build_default_wcs(coord: SkyCoord, shape: tuple, pix_arcsec: float = 6.15) -> WCS:
+def _build_default_wcs(coord: SkyCoord, shape: tuple, pix_arcsec: float = PIX_ARCSEC) -> WCS:
+    """Та же сетка, что epochs.make_target_wcs (на случай, если WCS не передали)."""
     ny, nx = shape
     w = WCS(naxis=2)
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
     w.wcs.crval = [coord.ra.deg, coord.dec.deg]
-    w.wcs.crpix = [nx / 2.0, ny / 2.0]
+    w.wcs.crpix = [(nx + 1) / 2.0, (ny + 1) / 2.0]
     w.wcs.cdelt = [-pix_arcsec / 3600.0, pix_arcsec / 3600.0]
     return w
 
 
-def _select_best_detector(by_detector: dict, coord: SkyCoord) -> list:
-    """ВЫБОР ДЕТЕКТОРА ПО ЯРКОСТИ (исправляет баг WISE 0855)"""
-    valid_dets = {d: frames for d, frames in by_detector.items() if len(frames) >= 2}
-    if not valid_dets:
-        return []
-
-    best_det = None
-    max_signal = -np.inf
-
-    for det, frames in valid_dets.items():
-        img = frames[0][1]
-        w = frames[0][2] if len(frames[0]) > 2 and frames[0][2] is not None else _build_default_wcs(coord, img.shape)
-        x0, y0 = w.world_to_pixel(coord)
-        ix, iy = int(round(float(x0))), int(round(float(y0)))
-        
-        ny, nx = img.shape
-        if 0 <= ix < nx and 0 <= iy < ny:
-            # Смотрим сигнал точно в центре (окно 3x3)
-            center_cut = img[max(0, iy-1):min(ny, iy+2), max(0, ix-1):min(nx, ix+2)]
-            if not np.all(np.isnan(center_cut)):
-                signal = np.nanmax(center_cut)
-                if signal > max_signal:
-                    max_signal = signal
-                    best_det = det
-                    
-    if best_det is None:
-        best_det = list(valid_dets.keys())[0]
-        
-    return valid_dets[best_det]
-
-
-def measure_motion(frames: list, coord: SkyCoord, target_wcs: WCS = None, box: int = 5) -> dict:
-    if not frames or len(frames) < 2:
-        return {"speed_arcsec_yr": 0.0, "direction_deg": 0.0, "pm_ra_arcsec_yr": 0.0, "pm_dec_arcsec_yr": 0.0, "n_epochs": len(frames) if frames else 0, "positions": []}
-
-    by_detector = {}
+def _group(frames, target_wcs):
+    by_det = {}
     for item in frames:
-        epoch_date, detector, img = item[0], item[1], item[2]
+        date, det, img = item[0], item[1], item[2]
         w = item[3] if len(item) > 3 else target_wcs
-        by_detector.setdefault(detector, []).append((epoch_date, img, w))
+        by_det.setdefault(det, []).append((date, img, w))
+    return by_det
 
-    det_frames = _select_best_detector(by_detector, coord)
-    if len(det_frames) < 2:
-        return {"speed_arcsec_yr": 0.0, "direction_deg": 0.0, "pm_ra_arcsec_yr": 0.0, "pm_dec_arcsec_yr": 0.0, "n_epochs": len(det_frames), "positions": []}
 
-    times_yr, ras_deg, decs_deg, positions_log = [], [], [], []
+def _fill_nan_cores(cut: np.ndarray) -> np.ndarray:
+    """Пересвеченное ядро (NaN внутри звезды) -> максимум окна; прочие NaN -> медиана."""
+    out = np.array(cut, dtype=float)
+    bad = ~np.isfinite(out)
+    if not bad.any():
+        return out
+    from scipy import ndimage
+    lab, n = ndimage.label(bad)
+    edge = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
+    vmax, vmed = np.nanmax(out), np.nanmedian(out)
+    for k in range(1, n + 1):
+        out[lab == k] = vmed if k in edge else vmax
+    return out
 
-    for epoch_date, img, w in det_frames:
-        if w is None:
-            w = _build_default_wcs(coord, img.shape)
 
-        x0, y0 = w.world_to_pixel(coord)
-        ix, iy = int(round(float(x0))), int(round(float(y0)))
-        ny, nx = img.shape
-        if ix - box < 0 or ix + box + 1 > nx or iy - box < 0 or iy + box + 1 > ny:
+def _saturated_core(img: np.ndarray, x: float, y: float, max_r: int = 10):
+    """Если в точке (x, y) пересвеченное ядро (закрытая NaN-область), вернуть (cx, cy, площадь)
+    — центр «дыры». Дыра симметрична вокруг звезды, так что это точный центр яркой звезды."""
+    from scipy import ndimage
+    ix, iy = int(round(x)), int(round(y))
+    ny, nx = img.shape
+    if not (0 <= ix < nx and 0 <= iy < ny):
+        return None
+    y0, y1, x0, x1 = max(0, iy - max_r), min(ny, iy + max_r + 1), max(0, ix - max_r), min(nx, ix + max_r + 1)
+    sub_ = ~np.isfinite(img[y0:y1, x0:x1])
+    lab, n = ndimage.label(sub_)
+    if n == 0:
+        return None
+    best, best_d = None, 2.5
+    for k in range(1, n + 1):
+        yy, xx = np.nonzero(lab == k)
+        d = np.min(np.hypot(xx + x0 - x, yy + y0 - y))
+        if d < best_d:
+            best, best_d = k, d
+    if best is None:
+        return None
+    yy, xx = np.nonzero(lab == best)
+    h, w = sub_.shape
+    touches_edge = ((yy.min() == 0 and y0 == 0) or (xx.min() == 0 and x0 == 0)
+                    or (yy.max() == h - 1 and y1 == ny) or (xx.max() == w - 1 and x1 == nx))
+    if touches_edge or len(yy) > h * w * 0.8:
+        return None  # это край кадра / нет данных, а не звезда
+    return float(xx.mean() + x0), float(yy.mean() + y0), int(len(yy))
+
+
+def _noise(img: np.ndarray) -> float:
+    v = img[np.isfinite(img)]
+    return float(1.4826 * np.median(np.abs(v - np.median(v)))) if v.size else np.nan
+
+
+def _prominence(img: np.ndarray, w: WCS, coord: SkyCoord, r_px: int = 2) -> float:
+    """Насколько объект в точке coord выделяется на кадре: пик / 99.5-й перцентиль кадра.
+
+    Холодный карлик на длинных волнах — один из самых ярких источников кадра (>1),
+    а на коротких — теряется среди звёзд. Так выбирается детектор, где виден именно он,
+    а не соседняя звезда.
+    """
+    x, y = (float(v) for v in w.world_to_pixel(coord))
+    ix, iy = int(round(x)), int(round(y))
+    ny, nx = img.shape
+    if not (r_px <= ix < nx - r_px and r_px <= iy < ny - r_px):
+        return -np.inf
+    if _saturated_core(img, x, y) is not None:
+        return 10.0  # пересвеченная звезда — заведомо самый яркий источник
+    cut = _fill_nan_cores(img[iy - r_px:iy + r_px + 1, ix - r_px:ix + r_px + 1])
+    bg = np.nanmedian(img)
+    ref = np.nanpercentile(img, 99.5) - bg
+    peak = np.nanmax(cut) - bg
+    snr = peak / _noise(img) if _noise(img) > 0 else 0
+    if not np.isfinite(peak) or ref <= 0 or snr < 5:
+        return -np.inf
+    return float(peak / ref)
+
+
+def _select_detectors(by_det: dict, coord: SkyCoord, top: int = 2) -> list[int]:
+    """Детекторы (≥2 эпох), где объект виднее всего, по убыванию заметности."""
+    scored = []
+    for det, items in by_det.items():
+        if len(items) < 2:
             continue
+        p = np.nanmedian([_prominence(img, w if w is not None else _build_default_wcs(coord, img.shape), coord)
+                          for _, img, w in items])
+        if np.isfinite(p):
+            scored.append((p, det))
+    scored.sort(reverse=True)
+    if not scored:
+        return []
+    best = scored[0][0]
+    return [d for p, d in scored[:top] if p >= 0.5 * best]
 
-        cut = np.array(img[iy - box : iy + box + 1, ix - box : ix + box + 1], dtype=float)
-        
-        if np.all(np.isnan(cut)):
-            continue
-            
-        # ЗАЛИВКА ПЕРЕСВЕТОВ ДЛЯ ЗВЕЗДЫ БАРНАРДА
-        local_max = np.nanmax(cut)
-        med = np.nanmedian(cut)
-        cut = np.nan_to_num(cut, nan=local_max) - med
-        cut[cut < 0] = 0.0
 
-        if np.sum(cut) <= 0:
-            continue
+def _centroid(img: np.ndarray, x0: float, y0: float, search: int = 2, r: int = 2):
+    """Центр объекта около (x0, y0): ищем самый яркий пиксель в радиусе search,
+    затем центр масс в окне ±r вокруг него (пересвеченное ядро залито)."""
+    sat = _saturated_core(img, x0, y0)
+    if sat is not None:
+        return sat[0], sat[1]
+    ny, nx = img.shape
+    ix, iy = int(round(x0)), int(round(y0))
+    b = search + r + 1
+    if ix - b < 0 or iy - b < 0 or ix + b >= nx or iy + b >= ny:
+        return None
+    big = _fill_nan_cores(img[iy - b:iy + b + 1, ix - b:ix + b + 1])
+    big = big - np.nanmedian(img)
+    inner = big[b - search:b + search + 1, b - search:b + search + 1]
+    py, px = np.unravel_index(np.nanargmax(inner), inner.shape)
+    py, px = py + b - search, px + b - search
+    win = big[py - r:py + r + 1, px - r:px + r + 1].copy()
+    win[win < 0] = 0
+    if win.sum() <= 0:
+        return None
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    cx = px + (win * xx).sum() / win.sum()
+    cy = py + (win * yy).sum() / win.sum()
+    return ix - b + cx, iy - b + cy
 
-        cx, cy = centroid_com(cut)
-        if np.isnan(cx) or np.isnan(cy):
-            continue
 
-        sky_pos = w.pixel_to_world(ix - box + cx, iy - box + cy)
+def _date_to_year(d) -> float:
+    if isinstance(d, (int, float, np.floating)):
+        return float(Time(d, format="mjd").jyear)
+    return float(Time(str(d).strip()).jyear)
 
-        try:
-            if isinstance(epoch_date, (int, float)):
-                t_obj = Time(epoch_date, format="mjd")
-            elif isinstance(epoch_date, str):
-                clean_date = epoch_date.strip()
-                if len(clean_date) == 10:
-                    clean_date += "T00:00:00"
-                t_obj = Time(clean_date)
-            else:
-                t_obj = Time(epoch_date)
-            t_yr = float(t_obj.jyear)
-        except Exception:
-            continue
 
-        times_yr.append(t_yr)
-        ras_deg.append(float(sky_pos.ra.deg))
-        decs_deg.append(float(sky_pos.dec.deg))
-        positions_log.append({"epoch": str(epoch_date), "ra": round(float(sky_pos.ra.deg), 6), "dec": round(float(sky_pos.dec.deg), 6)})
+def _fit_motion(times, ras, decs):
+    t = np.asarray(times) - np.mean(times)
+    cosd = np.cos(np.deg2rad(np.mean(decs)))
+    x = (np.asarray(ras) - np.mean(ras)) * cosd * 3600
+    y = (np.asarray(decs) - np.mean(decs)) * 3600
+    if len(t) >= 3:
+        (px, _), cx = np.polyfit(t, x, 1, cov=True)
+        (py, _), cy = np.polyfit(t, y, 1, cov=True)
+        ex, ey = np.sqrt(cx[0, 0]), np.sqrt(cy[0, 0])
+    else:
+        px, py = np.polyfit(t, x, 1)[0], np.polyfit(t, y, 1)[0]
+        ex = ey = np.nan
+    return float(px), float(py), float(ex), float(ey)
 
-    if len(times_yr) < 2 or (max(times_yr) - min(times_yr)) < 0.04:
-        return {"speed_arcsec_yr": 0.0, "direction_deg": 0.0, "pm_ra_arcsec_yr": 0.0, "pm_dec_arcsec_yr": 0.0, "n_epochs": len(times_yr), "positions": positions_log}
 
-    times_arr = np.array(times_yr) - np.mean(times_yr)
-    ras_arr = np.array(ras_deg)
-    decs_arr = np.array(decs_deg)
+def measure_motion(frames: list, coord: SkyCoord, target_wcs: WCS = None, box: int = 2,
+                   detectors: list[int] | None = None) -> dict:
+    """Собственное движение по кадрам эпох.
 
-    cos_dec = np.cos(np.deg2rad(np.mean(decs_arr)))
-    pm_ra_arcsec_yr = float(np.polyfit(times_arr, ras_arr, 1)[0]) * cos_dec * 3600.0
-    pm_dec_arcsec_yr = float(np.polyfit(times_arr, decs_arr, 1)[0]) * 3600.0
+    В каждом из 1–2 детекторов, где объект виден лучше всего, находим центр объекта
+    на каждой эпохе и проводим прямую по времени; детекторы усредняются.
+    Возвращает speed_arcsec_yr, direction_deg (от севера через восток), pm_ra/pm_dec,
+    speed_err_arcsec_yr (ошибка по разбросу точек; NaN при 2 эпохах), detectors, positions.
+    """
+    empty = {"speed_arcsec_yr": 0.0, "direction_deg": 0.0, "pm_ra_arcsec_yr": 0.0, "pm_dec_arcsec_yr": 0.0,
+             "speed_err_arcsec_yr": float("nan"), "n_epochs": 0, "detectors": [], "positions": []}
+    if not frames or len(frames) < 2:
+        return empty
+    by_det = _group(frames, target_wcs)
+    dets = detectors or _select_detectors(by_det, coord)
+    if not dets:
+        return empty
 
-    speed = float(np.hypot(pm_ra_arcsec_yr, pm_dec_arcsec_yr))
-    direction = float(np.rad2deg(np.arctan2(pm_ra_arcsec_yr, pm_dec_arcsec_yr)) % 360.0)
+    fits, positions, n_ep = [], [], 0
+    for det in dets:
+        times, ras, decs = [], [], []
+        for date, img, w in by_det[det]:
+            w = w if w is not None else _build_default_wcs(coord, img.shape)
+            x0, y0 = (float(v) for v in w.world_to_pixel(coord))
+            c = _centroid(img, x0, y0, search=box)
+            if c is None:
+                continue
+            pos = w.pixel_to_world(*c)
+            try:
+                times.append(_date_to_year(date))
+            except Exception:
+                continue
+            ras.append(float(pos.ra.deg)); decs.append(float(pos.dec.deg))
+            positions.append({"epoch": str(date), "detector": int(det),
+                              "ra": round(float(pos.ra.deg), 6), "dec": round(float(pos.dec.deg), 6)})
+        if len(times) >= 2 and max(times) - min(times) >= 0.25:
+            fits.append(_fit_motion(times, ras, decs))
+            n_ep = max(n_ep, len(times))
+    if not fits:
+        return dict(empty, positions=positions)
 
+    f = np.array(fits)
+    if len(f) > 1:
+        # детекторы противоречат друг другу (например, на коротких волнах меряется соседняя звезда)
+        # -> верим тому, где объект заметнее (он первый в списке)
+        e = np.nanmax(np.hypot(f[:, 2], f[:, 3])) if np.isfinite(f[:, 2:]).any() else 1.0
+        if np.hypot(*(f[0, :2] - f[1, :2])) > max(3.0, 3 * e):
+            f, dets = f[:1], dets[:1]
+    pmra, pmdec = float(np.mean(f[:, 0])), float(np.mean(f[:, 1]))
+    # ошибка: по разбросу точек внутри детектора и между детекторами
+    errs = np.nanmean(np.hypot(f[:, 2], f[:, 3])) if np.isfinite(f[:, 2:]).any() else np.nan
+    if len(f) > 1:
+        between = float(np.hypot(*np.std(f[:, :2], axis=0)))
+        errs = np.nanmax([errs, between]) if np.isfinite(errs) else between
+    speed = float(np.hypot(pmra, pmdec))
     return {
         "speed_arcsec_yr": round(speed, 2),
-        "direction_deg": round(direction, 1),
-        "pm_ra_arcsec_yr": round(pm_ra_arcsec_yr, 2),
-        "pm_dec_arcsec_yr": round(pm_dec_arcsec_yr, 2),
-        "n_epochs": len(times_yr),
-        "positions": positions_log
+        "direction_deg": round(float(np.degrees(np.arctan2(pmra, pmdec)) % 360), 1),
+        "pm_ra_arcsec_yr": round(pmra, 2),
+        "pm_dec_arcsec_yr": round(pmdec, 2),
+        "speed_err_arcsec_yr": round(float(errs), 2) if np.isfinite(errs) else float("nan"),
+        "n_epochs": n_ep,
+        "detectors": [int(d) for d in dets],
+        "positions": positions,
     }
 
 
+def _ring_mean(img: np.ndarray, x: float, y: float, r_in: float, r_out: float) -> float:
+    """Средняя яркость в кольце по хорошим пикселям (не зависит от размера пересвеченной дыры)."""
+    v = CircularAnnulus((x, y), r_in=r_in, r_out=r_out).to_mask("center").get_values(img)
+    v = v[np.isfinite(v)]
+    return float(np.mean(v)) if v.size else float("nan")
+
+
+def _flux(img: np.ndarray, x: float, y: float, r: float, r_in: float, r_out: float) -> float:
+    """Апертурный поток с фоном из кольца; NaN-пиксели в апертуре игнорируются."""
+    mask = ~np.isfinite(img)
+    ap = CircularAperture((x, y), r=r)
+    an = CircularAnnulus((x, y), r_in=r_in, r_out=r_out)
+    bkg = np.nanmedian(an.to_mask("center").get_values(img))
+    t = aperture_photometry(np.nan_to_num(img), ap, mask=mask)["aperture_sum"][0]
+    # площадь только по хорошим пикселям
+    area = aperture_photometry((~mask).astype(float), ap)["aperture_sum"][0]
+    return float(t - bkg * area)
+
+
 def measure_variability(frames: list, coord: SkyCoord, target_wcs: WCS = None) -> dict:
+    """Переменность: размах потока объекта между эпохами в детекторе, где он виден лучше всего.
+
+    Пересвеченные звёзды (NaN в ядре) меряются по крыльям — кольцо 2–5 пикселей.
+    Оговорка: внутри детектора длина волны в разных эпохах чуть разная, у очень красных
+    звёзд это добавляет ~10–20% к размаху; порог «переменная» — 30%.
+    """
     if not frames or len(frames) < 2:
         return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Недостаточно данных"}
+    by_det = _group(frames, target_wcs)
+    dets = _select_detectors(by_det, coord, top=1)
+    if not dets:
+        return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Объект слишком тусклый"}
 
-    by_detector = {}
-    for item in frames:
-        epoch_date, detector, img = item[0], item[1], item[2]
-        w = item[3] if len(item) > 3 else target_wcs
-        by_detector.setdefault(detector, []).append((epoch_date, img, w))
-
-    det_frames = _select_best_detector(by_detector, coord)
-    
-    fluxes = []
-    for epoch_date, img, w in det_frames:
-        if w is None:
-            w = _build_default_wcs(coord, img.shape)
-
-        x0, y0 = w.world_to_pixel(coord)
-        x, y = float(x0), float(y0)
+    items = by_det[dets[0]]
+    wings, r_sat = False, 2.0
+    for date, img, w in items:
+        w = w if w is not None else _build_default_wcs(coord, img.shape)
+        x, y = (float(v) for v in w.world_to_pixel(coord))
+        sat = _saturated_core(img, x, y)
+        if sat is not None:
+            wings = True
+            r_sat = max(r_sat, float(np.sqrt(sat[2] / np.pi)))
+    fluxes, dates, errs = [], [], []
+    for date, img, w in items:
+        w = w if w is not None else _build_default_wcs(coord, img.shape)
+        x, y = (float(v) for v in w.world_to_pixel(coord))
+        c = _centroid(img, x, y)
+        if c is not None:
+            x, y = c
         ny, nx = img.shape
-
-        if x < 7 or x > nx - 8 or y < 7 or y > ny - 8:
+        if x < 12 or x > nx - 13 or y < 12 or y > ny - 13:
             continue
-
-        ap = CircularAperture((x, y), r=2.0)
-        an = CircularAnnulus((x, y), r_in=4.0, r_out=6.0)
-        
-        an_vals = an.to_mask("center").get_values(img)
-        if len(an_vals) == 0 or np.all(np.isnan(an_vals)):
-            continue
-            
-        bkg = np.nanmedian(an_vals)
-        total = aperture_photometry(img, ap)["aperture_sum"][0]
-        net_flux = float(total - bkg * ap.area)
-        
-        if not np.isnan(net_flux) and net_flux > 0:
-            fluxes.append(net_flux)
+        noise = _noise(img)
+        if wings:
+            # яркость крыльев: кольцо сразу за самой большой пересвеченной областью минус фон
+            r1 = r_sat + 1.5
+            f = _ring_mean(img, x, y, r1, r1 + 2.5) - _ring_mean(img, x, y, r1 + 5, r1 + 7)
+            e = noise / np.sqrt(max(1.0, np.pi * ((r1 + 2.5) ** 2 - r1 ** 2)))
+        else:
+            f = _flux(img, x, y, r=2, r_in=4, r_out=6)
+            e = noise * np.sqrt(np.pi * 4)
+        if np.isfinite(f) and f > 0:
+            fluxes.append(f); dates.append(str(date)); errs.append(e)
 
     if len(fluxes) < 2:
         return {"is_variable": False, "rel_amp": 0.0, "fluxes": fluxes, "label": "Недостаточно данных"}
+    med = float(np.median(fluxes))
+    rel = float((max(fluxes) - min(fluxes)) / med)
+    signif = (max(fluxes) - min(fluxes)) / (np.sqrt(2) * np.median(errs)) if np.median(errs) > 0 else np.inf
+    is_var = rel > 0.30 and signif > 5
+    how = " (по крыльям: ядро пересвечено)" if wings else ""
+    if rel > 0.30 and not is_var:
+        label = f"Разброс {rel * 100:.0f}% в пределах шума — переменность не доказана"
+    elif rel > 0.6:
+        label = f"Сильная переменность (размах {rel * 100:.0f}%){how}"
+    elif is_var:
+        label = f"Умеренная переменность (размах {rel * 100:.0f}%){how}"
+    else:
+        label = f"Стабильный блеск (разброс {rel * 100:.0f}%){how}"
+    return {"is_variable": is_var, "rel_amp": round(rel, 2), "fluxes": [round(f, 2) for f in fluxes],
+            "dates": dates, "detector": int(dets[0]), "saturated": wings, "label": label}
 
-    med_flux = float(np.median(fluxes))
-    if med_flux <= 0:
-        return {"is_variable": False, "rel_amp": 0.0, "fluxes": fluxes, "label": "Объект слишком тусклый"}
 
-    rel_amp = (max(fluxes) - min(fluxes)) / med_flux
-    is_var = rel_amp > 0.25
-
-    if rel_amp > 0.5: label = f"Сильная переменность (размах {rel_amp * 100:.0f}%)"
-    elif is_var: label = f"Умеренная переменность (размах {rel_amp * 100:.0f}%)"
-    else: label = f"Стабильный блеск (разброс {rel_amp * 100:.0f}%)"
-
-    return {"is_variable": is_var, "rel_amp": round(rel_amp, 2), "fluxes": [round(f, 2) for f in fluxes], "label": label}
+def _simbad_link(coord: SkyCoord, radius_arcsec: float) -> str:
+    from urllib.parse import quote
+    return (f"{SIMBAD_MIRROR}?Coord={quote(f'{coord.ra.deg:.6f} {coord.dec.deg:+.6f}')}"
+            f"&Radius={radius_arcsec:g}&Radius.unit=arcsec")
 
 
-def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0) -> dict:
-    info = {"found": False, "name": "Неизвестный объект", "otype": "", "source": None, "simbad_url": f"https://simbad.u-strasbg.fr/simbad/sim-coo?Coord={coord.ra.deg}+{coord.dec.deg}&Radius={radius_arcsec}&Radius.unit=arcsec"}
+def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True) -> dict:
+    """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3."""
+    info = {"found": False, "name": "Неизвестный объект", "otype": "", "source": None,
+            "simbad_url": _simbad_link(coord, radius_arcsec)}
 
-    for test_name, data in FALLBACK_OBJECTS.items():
-        test_c = now_coord(test_name)
-        if coord.separation(test_c).arcsec < 20.0:
-            info["found"] = True
-            info["name"] = test_name.title() if test_name != "WISE 0855" else "WISE 0855-0714"
-            info["source"] = "Local/SIMBAD"
+    for key, t in TARGETS.items():
+        if coord.separation(coord_at(key, "2026-01-01")).arcsec < 30.0:
+            info.update(found=True, name=t["title"], otype=t["kind"], source="targets (Gaia DR3/SIMBAD)")
             return info
+    if not online:
+        return info
 
     try:
-        s = Simbad()
-        s.SIMBAD_URL = "https://simbad.harvard.edu/simbad/sim-script"
-        s.TAP_URL = "https://simbad.harvard.edu/simbad/sim-tap"
+        s = simbad()
         s.add_votable_fields("otype")
         res = s.query_region(coord, radius=radius_arcsec * u.arcsec)
         if res is not None and len(res) > 0:
-            cols = {col.lower(): col for col in res.colnames}
-            main_id = res[0][cols.get("main_id", res.colnames[0])]
-            if isinstance(main_id, bytes): main_id = main_id.decode("utf-8")
-            otype = res[0][cols["otype"]] if "otype" in cols else ""
-            if isinstance(otype, bytes): otype = otype.decode("utf-8")
-            info["found"] = True
-            info["name"] = str(main_id).strip()
-            info["otype"] = str(otype).strip()
-            info["source"] = "SIMBAD"
+            cols = {c.lower(): c for c in res.colnames}
+            info.update(found=True, name=str(res[0][cols.get("main_id", res.colnames[0])]).strip(),
+                        otype=str(res[0][cols["otype"]]).strip() if "otype" in cols else "", source="SIMBAD")
             return info
-    except Exception: pass
+    except Exception:
+        pass
 
     try:
-        Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"
-        job = Gaia.cone_search_async(coord, radius=radius_arcsec * u.arcsec)
-        g_res = job.get_results()
-        if g_res is not None and len(g_res) > 0:
-            source_id = g_res[0]["SOURCE_ID"] if "SOURCE_ID" in g_res.colnames else g_res[0]["source_id"]
-            info["found"] = True
-            info["name"] = f"Gaia DR3 {source_id}"
-            info["otype"] = "Star (Gaia)"
-            info["source"] = "Gaia DR3"
-            return info
-    except Exception: pass
-
+        import requests
+        q = (f"SELECT TOP 1 source_id, phot_g_mean_mag FROM gaiadr3.gaia_source WHERE 1=CONTAINS("
+             f"POINT('ICRS',ra,dec),CIRCLE('ICRS',{coord.ra.deg},{coord.dec.deg},{radius_arcsec / 3600}))"
+             f" ORDER BY phot_g_mean_mag")
+        r = requests.post("https://gaia.ari.uni-heidelberg.de/tap/sync",
+                          data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": q}, timeout=30)
+        lines = r.text.strip().splitlines()
+        if r.ok and len(lines) > 1:
+            sid = lines[1].split(",")[0]
+            info.update(found=True, name=f"Gaia DR3 {sid}", otype="звезда (Gaia)", source="Gaia DR3")
+    except Exception:
+        pass
     return info
 
 
-def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict) -> dict:
-    cat = _check_catalogs(coord)
-    speed = motion.get("speed_arcsec_yr", 0.0) if motion else 0.0
-    direction = motion.get("direction_deg", 0.0) if motion else 0.0
-    n_epochs = motion.get("n_epochs", 0) if motion else 0
-    is_var = variability.get("is_variable", False) if variability else False
-    var_label = variability.get("label", "Нет данных") if variability else "Нет данных"
-
+def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, online: bool = True) -> dict:
+    """Карточка «Кто это?» по простым правилам (см. план)."""
+    cat = _check_catalogs(coord, online=online)
+    motion = motion or {}
+    speed = motion.get("speed_arcsec_yr", 0.0) or 0.0
+    err = motion.get("speed_err_arcsec_yr", float("nan"))
+    n_ep = motion.get("n_epochs", 0)
+    variability = variability or {}
+    is_var = variability.get("is_variable", False)
+    var_label = variability.get("label", "Нет данных")
     scores = scores or {}
+
+    # движение считаем значимым, если оно больше 1″/год и больше 2 ошибок (эпох всего 3–5)
+    noise = 2 * err if np.isfinite(err) else 2.0
+    moving = speed >= max(1.0, noise)
     has_water = (scores.get("water") or 0) > 0.15
     has_methane = (scores.get("methane") or 0) > 0.15
-    has_molecules = has_water or has_methane
+    has_mol = has_water or has_methane
 
-    if n_epochs <= 1 or speed > 60.0: verdict = "Возможно, астероид или артефакт (виден на 1 кадре или слишком быстрый)"
-    elif speed >= 0.5 and has_molecules: verdict = "Похож на коричневый карлик (движется + признаки метана/воды)"
-    elif speed >= 0.5 and not has_molecules: verdict = "Близкая звезда с большим собственным движением"
-    elif speed < 0.5 and is_var: verdict = "Переменная звезда (меняет яркость, но стоит на месте)"
-    elif not cat["found"]: verdict = "Кандидат: нужна проверка (совпадений в каталогах нет)"
-    else: verdict = f"Известный стационарный источник ({cat['otype'] or 'звезда/галактика'})"
+    if n_ep <= 1 or speed > 60.0:
+        verdict = "Возможно, астероид или артефакт (виден на одном кадре или слишком быстрый)"
+    elif moving and has_mol:
+        verdict = "Похож на коричневый карлик (движется + признаки метана/воды)"
+    elif moving:
+        verdict = "Близкая звезда с большим собственным движением"
+    elif is_var:
+        verdict = "Переменная звезда (меняет яркость, но стоит на месте)"
+    elif not cat["found"]:
+        verdict = "Кандидат: нужна проверка (совпадений в каталогах нет)"
+    else:
+        verdict = f"Известный неподвижный источник ({cat['otype'] or 'звезда/галактика'})"
 
-    mol_badges = []
-    mol_names_ru = {"water": "Вода (H₂O)", "methane": "Метан (CH₄)", "co2": "CO₂", "co": "CO"}
-    for key, label_ru in mol_names_ru.items():
-        val = scores.get(key)
-        if val is not None and not np.isnan(val) and val > 0.15:
-            mol_badges.append(f"{label_ru}: {val:.2f}")
-
+    names = {"water": "Вода (H₂O)", "methane": "Метан (CH₄)", "co2": "CO₂", "co": "CO"}
+    badges = [f"{lab}: {scores[k]:.2f}" for k, lab in names.items()
+              if scores.get(k) is not None and np.isfinite(scores[k]) and scores[k] > 0.15]
+    speed_txt = (f"{speed:.1f} ± {err:.1f}″/год" if np.isfinite(err) else f"{speed:.1f}″/год")
     return {
         "name": cat["name"], "catalog_found": cat["found"], "catalog_type": cat["otype"],
-        "speed_arcsec_yr": speed, "direction_deg": direction, "variability": var_label,
-        "molecule_badges": mol_badges if mol_badges else ["Явных молекулярных полос не выявлено"],
-        "scores": scores, "verdict": verdict, "simbad_url": cat["simbad_url"]
+        "catalog_source": cat["source"],
+        "speed_arcsec_yr": speed, "speed_err_arcsec_yr": err, "speed_text": speed_txt,
+        "direction_deg": motion.get("direction_deg", 0.0), "moving": bool(moving),
+        "variability": var_label,
+        "molecule_badges": badges or ["Явных молекулярных полос не выявлено"],
+        "scores": scores, "verdict": verdict, "simbad_url": cat["simbad_url"],
     }

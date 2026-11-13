@@ -205,3 +205,16 @@ def frames_by_detector(frames) -> dict[int, list[tuple[str, np.ndarray]]]:
     for date, det, img in frames:
         out[det].append((date, img))
     return dict(out)
+
+
+def good_frames(frames, info, frac: float = 0.25):
+    """Убрать шумные кадры: собранные из < frac от обычного (медианного по детектору) числа снимков."""
+    if not info or len(info) != len(frames):
+        return frames
+    keep = []
+    for det in sorted({f[1] for f in frames}):
+        idx = [i for i, f in enumerate(frames) if f[1] == det]
+        n = np.array([info[i]["n_exposures"] for i in idx])
+        ok = [i for i, k in zip(idx, n >= frac * np.median(n)) if k]
+        keep.extend(ok if len(ok) >= 2 else idx)
+    return [frames[i] for i in sorted(keep)]
