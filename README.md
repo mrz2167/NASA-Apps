@@ -11,6 +11,15 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Живой сайт
+
+**https://nasa-skywatch-production.up.railway.app/** (Railway, проект `nasa-skywatch`)
+
+Передеплой из папки с `cache/` (кэш в git не входит, поэтому `--no-gitignore`; лишнее отсекает `.railwayignore`):
+```
+railway up --no-gitignore --ci
+```
+
 ## Docker (рекомендуется)
 
 ```

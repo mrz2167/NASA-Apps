@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+logs/
+scratch/
+out/
+*.zip
+test_pipeline.py
