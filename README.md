@@ -28,8 +28,41 @@ pip install -r requirements.txt
 - Повторная отправка того же объекта не дублируется; не больше 60 отчётов в час с одного браузера.
 - Смотреть: страница **`/reports`** (или `/api/reports.csv`) с ключом команды `REPORTS_KEY` — таблица, фильтр
   «только кандидаты», CSV, удаление мусора. Без `REPORTS_KEY` на сервере список закрыт (отчёты всё равно сохраняются).
-- Хранилище — SQLite `REPORTS_DB` (по умолчанию `data/reports.db`). **На Railway** файловая система сбрасывается
-  при деплое: подключите volume (например, `/data`) и задайте `REPORTS_DB=/data/reports.db`.
+- Хранилище — SQLite, по умолчанию `cache/reports.db`: на Railway это постоянный диск (volume в `/app/cache`),
+  деплой его не стирает. Другой путь — переменная `REPORTS_DB`.
+
+## Резервные копии (`backup.py`, `scripts/backup.py`)
+
+На сервере задайте `BACKUP_KEY` (без него берётся `REPORTS_KEY`; без обоих копии выключены).
+- `GET /api/admin/backup/reports.db?key=…` — целая копия базы отчётов (SQLite backup API, безопасно во время записи).
+- `GET /api/admin/backup/cache.tar?key=…` — весь кэш SPHEREx/WISE одним tar-потоком (~1 ГБ).
+- **Отчёты каждый день автоматически:** `.github/workflows/backup.yml` в 02:30 UTC скачивает `reports.db`, проверяет
+  и хранит 90 дней (Actions → Backup reports → артефакты). Нужен секрет репозитория `BACKUP_KEY`.
+- **Кэш** слишком большой для артефактов приватного репозитория — копируйте на компьютер:
+  `BACKUP_KEY=… python3 scripts/backup.py` (в `backups/ГГГГ-ММ-ДД/`, хранит 60 дней отчётов и 3 копии кэша;
+  каждая копия проверяется, неудачная попытка не трогает уже сохранённую). Раз в день через cron:
+  `30 3 * * * cd /путь/к/NASA-Apps && BACKUP_KEY=… python3 scripts/backup.py >> backups/log.txt 2>&1`
+- Восстановление: `reports.db` → `cache/reports.db` на сервере; `tar xf cache.tar` в папке приложения
+  (на Railway — `railway volume files upload`).
+
+## Тесты перед деплоем (`tests/`, `.github/workflows/test.yml`)
+
+- `pytest -q tests` — без сети и без кэша: здоровье сервера, страницы и синтаксис их скриптов, проверка параметров API (422),
+  отчёты, ключи и целостность резервных копий, быстрый отказ при падении WiseView, математика выбора объекта.
+- Playwright-тесты положите в `tests/e2e/` (`*.spec.js|ts` или `test_*.py`): workflow поднимает сервер и запускает их,
+  адрес — переменная `BASE_URL`. Тесты на реальных данных качают их из архивов, это медленнее.
+- **Чтобы сломанный код не уходил на сайт:** в Railway → сервис → Settings → включите **Wait for CI**.
+  Тогда push в `main` выкатывается только после зелёного workflow «Tests».
+
+## Если сайт упал (`/api/health`, `scripts/healthcheck.py`)
+
+- `/api/health` отвечает **503**, если сломана база отчётов или на диске < 0,3 ГБ; `wise.ok=false` — WiseView недоступен
+  (только предупреждение: SPHEREx работает, ученику пишем «WISE временно недоступен»).
+- Проще всего — **UptimeRobot** (бесплатно, проверка раз в 5 минут, письмо или Telegram): монитор HTTP(s) на
+  `https://nasa-skywatch-production.up.railway.app/api/health`, второй — на `/reports`.
+- Свой вариант на любом включённом компьютере: `scripts/healthcheck.py` раз в 5 минут из cron, сообщения в Telegram
+  (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) — только при смене состояния: упал / снова работает / сбой дольше часа.
+  GitHub Actions для этого не подходит: на приватном репозитории проверка каждые 5 минут съест бесплатные минуты.
 
 ## Docker (рекомендуется)
 

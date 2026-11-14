@@ -80,10 +80,15 @@ def _tap(query: str, retries: int = 2) -> Table:
 NEAR_ARCSEC = 3.0  # запрос в пределах 3″ от закэшированного центра берётся из кэша
 
 
-def _cached_query(coord: SkyCoord, size_deg: float) -> Path | None:
+# Готовые результаты поиска IRSA для полей сайта (кейсы, «Try», «Surprise me»), лежат в git: по ним поле
+# собирается из открытого бакета AWS, даже когда поиск IRSA (TAP) не работает. Обновить: make_seed.py.
+SEED = Path(__file__).resolve().parent / "seed" / "queries"
+
+
+def _cached_query(coord: SkyCoord, size_deg: float, folder: Path | None = None) -> Path | None:
     """Ближайший закэшированный запрос с тем же размером вырезки в пределах NEAR_ARCSEC."""
     best, best_sep = None, NEAR_ARCSEC
-    for f in (CACHE / "queries").glob("*.ecsv"):
+    for f in (folder or CACHE / "queries").glob("*.ecsv"):
         try:
             meta = Table.read(f).meta
             if abs(float(meta["size_deg"]) - size_deg) > 1e-9:
@@ -111,6 +116,9 @@ def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = 
     cache_file = CACHE / "queries" / f"{_key(ra, dec, size_deg)}.ecsv"
     if use_cache:
         hit = cache_file if cache_file.exists() else _cached_query(coord, size_deg)
+        if hit is None:                     # поля сайта: готовый поиск из git, без IRSA
+            seed = SEED / cache_file.name
+            hit = seed if seed.exists() else _cached_query(coord, size_deg, SEED)
         if hit is not None:
             return Table.read(hit)
     if offline:

@@ -1,0 +1,28 @@
+# Daily backup of the user reports (reports.db) from the live site, kept as a workflow artifact for 90 days.
+# The cache (~1 GB) is too big for artifacts on a private repo: back it up with scripts/backup.py on a computer.
+# Needs the repository secret BACKUP_KEY (same value as BACKUP_KEY, or REPORTS_KEY, on Railway).
+name: Backup reports
+
+on:
+  schedule:
+    - cron: "30 2 * * *"      # every day 02:30 UTC (07:30 Tashkent)
+  workflow_dispatch:           # "Run workflow" button for a manual backup
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and check reports.db
+        env:
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          BACKUP_DIR: ${{ runner.temp }}/backups
+        run: python3 scripts/backup.py reports
+      - name: Keep it for 90 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: ${{ runner.temp }}/backups/*/reports.db
+          retention-days: 90
+          if-no-files-found: error

@@ -40,6 +40,37 @@ class WiseUnavailable(RuntimeError):
     pass
 
 
+# WiseView — сторонний сервис. Если он лёг, не ждём его на каждом запросе: после сбоя 5 минут сразу
+# отвечаем «временно недоступен» (поля из кэша работают как обычно), потом пробуем снова.
+import threading as _threading
+import time as _time
+
+API_TIMEOUT_S = 30
+DOWN_FOR_S = 300
+DOWN_MSG = ("WISE frames are temporarily unavailable: WiseView (a third-party service) isn't answering. "
+            "SPHEREx frames still work, and WISE fields opened before are cached.")
+_state = {"down_until": 0.0, "last_error": None, "last_error_at": None, "last_ok_at": None}
+_state_lock = _threading.Lock()
+
+
+def _mark_down(err: Exception) -> None:
+    with _state_lock:
+        _state.update(down_until=_time.time() + DOWN_FOR_S, last_error=str(err)[:200], last_error_at=_time.time())
+
+
+def _mark_ok() -> None:
+    with _state_lock:
+        _state.update(down_until=0.0, last_ok_at=_time.time())
+
+
+def status() -> dict:
+    """Для /api/health: доступен ли WiseView по последним запросам."""
+    with _state_lock:
+        s = dict(_state)
+    return {"ok": s["down_until"] <= _time.time(), "last_error": s["last_error"],
+            "last_error_at": s["last_error_at"], "last_ok_at": s["last_ok_at"]}
+
+
 def _key(ra: float, dec: float, size: int, band: int) -> str:
     return hashlib.sha1(f"{ra:.5f}_{dec:+.5f}_{size}_{band}".encode()).hexdigest()[:12]
 
@@ -63,7 +94,7 @@ def _wcs(meta: dict) -> WCS:
 
 
 def _fetch_png(key: str, path) -> None:
-    r = requests.get(BUCKET + key, headers=UA, timeout=60)
+    r = requests.get(BUCKET + key, headers=UA, timeout=API_TIMEOUT_S)
     r.raise_for_status()
     Image.open(io.BytesIO(r.content)).verify()       # не PNG -> исключение, файл не пишем
     path.write_bytes(r.content)
@@ -90,26 +121,33 @@ def get_wise(ra: float, dec: float, fov: float = 0.1, band: int = 2, offline: bo
         meta = json.loads(meta_file.read_text())
     else:
         if offline:
-            raise WiseUnavailable("нет кэша WISE для этого места (офлайн)")
+            raise WiseUnavailable("No cached WISE frames for this spot (offline).")
+        if _time.time() < _state["down_until"]:
+            raise WiseUnavailable(DOWN_MSG)
         try:
-            r = requests.get(API, params=_params(ra, dec, size, band), headers=UA, timeout=120)
+            r = requests.get(API, params=_params(ra, dec, size, band), headers=UA, timeout=API_TIMEOUT_S)
             r.raise_for_status()
             meta = r.json()
         except Exception as e:
-            raise WiseUnavailable(f"WiseView не отвечает: {e}") from e
+            _mark_down(e)
+            raise WiseUnavailable(DOWN_MSG) from e
         if not meta.get("ims"):
-            raise WiseUnavailable(f"WiseView не вернул кадров: {str(meta)[:200]}")
+            raise WiseUnavailable("WiseView returned no WISE frames for this spot.")
         folder.mkdir(parents=True, exist_ok=True)
 
     paths = [folder / f"{i:02d}.png" for i in range(len(meta["ims"]))]
     todo = [(k, p) for k, p in zip(meta["ims"], paths) if not p.exists()]
     if todo:
         if offline:
-            raise WiseUnavailable("кэш WISE неполный (офлайн)")
+            raise WiseUnavailable("Cached WISE frames for this spot are incomplete (offline).")
+        if _time.time() < _state["down_until"]:
+            raise WiseUnavailable(DOWN_MSG)
         with ThreadPoolExecutor(8) as pool:
             errs = [f.exception() for f in [pool.submit(_fetch_png, k, p) for k, p in todo]]
         if any(errs):
-            raise WiseUnavailable(f"не скачались кадры WISE: {next(e for e in errs if e)}")
+            _mark_down(next(e for e in errs if e))
+            raise WiseUnavailable(DOWN_MSG)
+        _mark_ok()
     if not meta_file.exists():
         meta_file.write_text(json.dumps(meta))
 

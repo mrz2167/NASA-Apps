@@ -678,17 +678,31 @@ const SURPRISE_TIP = {
 };
 // Shuffle bag: every field once before any repeats.
 // The server says which fields it has built (/api/surprises); the case targets (with a key) are always ready.
-// Until it answers, or without a server, every field is allowed.
-function refreshSurprises(){ if(!CONFIG.API_BASE) return; api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); }).catch(()=>{}); }
-function surprise(){
+// The list grows while the server builds fields in the background, so it is refreshed every few minutes.
+// Without a server (?api=demo) every field is allowed; if the server doesn't answer, only the case targets.
+function refreshSurprises(){
+  if(!CONFIG.API_BASE) return Promise.resolve();
+  S.surpriseAsked=Date.now();
+  return api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); })
+    .catch(()=>{ if(!S.surpriseReady) S.surpriseReady=new Set(); });
+}
+function shuffled(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+async function surprise(hops){
+  hops = typeof hops==="number" ? hops : 0;          // onclick passes an event
   if(S.ctx!=="free") startFree();
-  if(!S.surpriseBag || !S.surpriseBag.length){
-    const ok = o => o.key || !S.surpriseReady || S.surpriseReady.has(o.name);
-    S.surpriseBag = SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0).sort(()=>Math.random()-.5);
-    refreshSurprises();
+  if(CONFIG.API_BASE && (!S.surpriseReady || Date.now()-(S.surpriseAsked||0) > 3*60e3)){
+    const wait=refreshSurprises(); if(!S.surpriseReady) await wait;   // first click: wait for the list once
+  }
+  const bad=S.surpriseBad||new Set();
+  const ok = o => !bad.has(o.name) && (o.key || !CONFIG.API_BASE || S.surpriseReady?.has(o.name));
+  S.surpriseBag=(S.surpriseBag||[]).filter(i=>ok(SURPRISES[i]));   // drop fields that stopped being ready
+  if(!S.surpriseBag.length){
+    S.surpriseBag = shuffled(SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0));
     if(S.surpriseBag[0]===S.surpriseLast && S.surpriseBag.length>1) S.surpriseBag.push(S.surpriseBag.shift());
   }
+  if(!S.surpriseBag.length) return toast("No surprises right now", "The archive is busy. Try one of the ready-made patches above.");
   const i=S.surpriseBag.shift(), o=SURPRISES[i]; S.surpriseLast=i;
+  S.surpriseScan={name:o.name, ra:o.ra, dec:o.dec, hops};
   const kind={bd:"Brown dwarf",fast:"Fast-moving star",var:"Variable star"}[o.kind];
   $("raIn").value=o.ra; $("decIn").value=o.dec;
   $("taskT").textContent="Surprise: "+o.name;
@@ -1411,6 +1425,11 @@ function checkCoords(ra, dec, fov, quiet){
   return [((ra%360)+360)%360, dec, f];
 }
 function scanFailed(err, args){
+  const sp=S.surpriseScan;
+  if(sp && Math.abs(args[0]-sp.ra)<1e-6 && Math.abs(args[1]-sp.dec)<1e-6){
+    S.surpriseScan=null; (S.surpriseBad=S.surpriseBad||new Set()).add(sp.name);
+    if(sp.hops<2){ toast("That field isn't ready", "The archive is slow right now. Picking another surprise…"); surprise(sp.hops+1); return; }
+  }
   $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
   const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
   $("errText").textContent=`No frames came back (${err.message||"network error"}). The archive can be slow or busy; try again in a moment.`;
@@ -1460,7 +1479,9 @@ async function reloadFrames(undo, after){
   let ok;
   freezeSelection();
   try{ ok=await loadApiFrames(); if(ok) await refollow(); }
-  catch(e){ ok=null; undo(); refollow(); toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
+  catch(e){ ok=null; undo(); refollow();
+    if(/WiseView|WISE frames/.test(e.message||"")) toast("WISE is unavailable right now", "WiseView, the service that serves the 2010–2024 WISE frames, isn't answering. You're still on SPHEREx; try WISE again in a few minutes.");
+    else toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
   if(ok===false) return;   // a newer scan or switch owns the viewer and the spinner
   $("loading").classList.remove("on"); if(ok && after) after(); draw();
 }

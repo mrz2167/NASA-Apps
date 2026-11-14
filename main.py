@@ -88,6 +88,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "P
 
 from reports import router as reports_router  # noqa: E402  общая таблица находок (/api/reports, /reports)
 app.include_router(reports_router)
+from backup import router as backup_router  # noqa: E402  резервные копии (/api/admin/backup/…)
+app.include_router(backup_router)
 
 PIX_ARCSEC = 6.15
 DIFF_POS = np.array([0xF6, 0xB5, 0x44], float)   # ярче — янтарный
@@ -356,18 +358,38 @@ def _clean(o):
 @app.get("/api/health")
 def health():
     """Liveness check: `ok`, how many fields are held in memory, and the warm-up after a restart.
+    Returns 503 when something essential is broken (reports database, disk), so an uptime monitor alerts.
+    `wise.ok` is false while WiseView (third-party, WISE frames) is down: a warning, not a failure.
 
     `warm.state`: `running` while the demo fields are being loaded, `demo_ready` once every case and
     "Try" field is in memory (the demo is fast from here), `done` when the "Surprise me" fields are
     also saved to disk.
     """
     import shutil
+    from fastapi.responses import JSONResponse
+    import reports as _reports
+    import wise as _wise_mod
+    problems = []
     try:
         du = shutil.disk_usage(CACHE)
         disk = {"free_gb": round(du.free / 1e9, 1), "used_gb": round(du.used / 1e9, 1)}
+        if du.free < 0.3e9:
+            problems.append(f"disk almost full ({du.free / 1e9:.2f} GB free)")
     except OSError:
         disk = None
-    return {"ok": True, "cached_fields": len(_SKIES), "warm": dict(_WARM), "disk": disk}
+        problems.append("cache disk not readable")
+    try:                                   # отчёты пользователей: база открывается и в неё можно писать
+        from contextlib import closing
+        with closing(_reports._db()) as con:
+            con.execute("BEGIN IMMEDIATE"); con.rollback()
+        reports_ok = True
+    except Exception as e:
+        reports_ok = False
+        problems.append(f"reports database: {e}")
+    body = {"ok": not problems, "problems": problems, "cached_fields": len(_SKIES), "warm": dict(_WARM),
+            "disk": disk, "reports_db": reports_ok, "wise": _wise_mod.status()}
+    # 503 — чтобы внешний монитор (UptimeRobot) прислал тревогу; WISE — сторонний сервис, он только предупреждение
+    return body if not problems else JSONResponse(body, status_code=503)
 
 
 def _det_items(sky: dict, detector: int) -> list:
