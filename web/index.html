@@ -677,10 +677,15 @@ const SURPRISE_TIP = {
   var:  "It's in the middle. Step through the frames: its brightness changes while its position stays put."
 };
 // Shuffle bag: every field once before any repeats.
+// The server says which fields it has built (/api/surprises); the case targets (with a key) are always ready.
+// Until it answers, or without a server, every field is allowed.
+function refreshSurprises(){ if(!CONFIG.API_BASE) return; api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); }).catch(()=>{}); }
 function surprise(){
   if(S.ctx!=="free") startFree();
   if(!S.surpriseBag || !S.surpriseBag.length){
-    S.surpriseBag = SURPRISES.map((_,i)=>i).sort(()=>Math.random()-.5);
+    const ok = o => o.key || !S.surpriseReady || S.surpriseReady.has(o.name);
+    S.surpriseBag = SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0).sort(()=>Math.random()-.5);
+    refreshSurprises();
     if(S.surpriseBag[0]===S.surpriseLast && S.surpriseBag.length>1) S.surpriseBag.push(S.surpriseBag.shift());
   }
   const i=S.surpriseBag.shift(), o=SURPRISES[i]; S.surpriseLast=i;
@@ -1818,7 +1823,7 @@ window.addEventListener("resize",()=>S.field&&!$("vPlay").hidden&&updateHud());
 
 (function boot(){
   if(CONFIG.API_BASE) $("demoNote").style.display="none";
-  resetFile(); clearSpectrum(); renderProgress();
+  resetFile(); clearSpectrum(); renderProgress(); refreshSurprises();
   const q=new URLSearchParams(location.search), ra=parseRA(q.get("ra")||""), dec=parseDec(q.get("dec")||"");
   if(q.get("ra")||q.get("dec")){   // shared link: validate before asking the server anything
     const c=checkCoords(ra, dec, q.get("fov")||FOV_DEF, true);

@@ -878,17 +878,38 @@ def _warm() -> None:
     extra = [f for f in _surprise_fields()
              if all(abs(f[1] - w[1]) > 1e-3 or abs(f[2] - w[2]) > 1e-3 for w in WARM_FIELDS)]
     _WARM.update(surprise_total=len(extra), surprise_done=0, surprise_failed=0)
-    for name, ra, dec in extra:
-        t = time.time()
-        try:
-            sky = _load_sky(ra, dec, 0.1, remember=False)    # на диск (и Gaia), память не трогаем
-            print(f"[warm] surprise {name}: {time.time() - t:.1f} s ({sky['n_loaded']} images)", flush=True)
-        except Exception as e:
-            _WARM["surprise_failed"] += 1
-            print(f"[warm] surprise {name}: skipped ({e})", flush=True)
-        _WARM["surprise_done"] += 1
-    _WARM.update(state="done", total_seconds=round(time.time() - t_all))
-    print(f"[warm] done in {time.time() - t_all:.0f} s", flush=True)
+    todo, rnd = list(extra), 0
+    while todo:                                         # IRSA can be down for hours: retry the rest every 10 min
+        rnd += 1
+        failed = []
+        for name, ra, dec in todo:
+            t = time.time()
+            try:
+                sky = _load_sky(ra, dec, 0.1, remember=False)    # на диск (и Gaia), память не трогаем
+                _READY_SURPRISES.add(name)
+                print(f"[warm] surprise {name}: {time.time() - t:.1f} s ({sky['n_loaded']} images)", flush=True)
+            except Exception as e:
+                failed.append((name, ra, dec))
+                print(f"[warm] surprise {name}: skipped ({str(e)[:120]})", flush=True)
+            if rnd == 1:
+                _WARM["surprise_done"] += 1
+        _WARM.update(surprise_failed=len(failed), surprise_ready=len(_READY_SURPRISES))
+        if rnd == 1:
+            _WARM.update(state="done", total_seconds=round(time.time() - t_all))
+            print(f"[warm] done in {time.time() - t_all:.0f} s; {len(failed)} surprise fields will be retried", flush=True)
+        todo = failed
+        if todo:
+            time.sleep(600)
+
+
+_READY_SURPRISES: set = set()
+
+
+@app.get("/api/surprises")
+def surprises():
+    """Names of the "Surprise me" fields the server can show right now (built and saved). The site picks
+    only from these, so a dead archive never lands a visitor on a field that can't load."""
+    return {"ready": sorted(_READY_SURPRISES), "warm": _WARM.get("state")}
 
 
 @app.on_event("startup")
