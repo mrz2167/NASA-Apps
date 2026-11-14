@@ -992,6 +992,7 @@ WARM_FIELDS = [
     ("Near Luhman 16", 162.328, -53.319),
     ("CRBR 2422.8-3423", 246.8525, -24.6842),
 ]
+from famous import FAMOUS as FAMOUS_FIELDS   # знаменитые объекты: прогреваются и защищены от очистки диска
 _WARM: dict = {"state": "idle"}
 
 
@@ -1028,7 +1029,7 @@ def _warm() -> None:
     _WARM.update(state="demo_ready", demo_seconds=round(time.time() - t_all))
     print(f"[warm] demo fields ready in {time.time() - t_all:.0f} s", flush=True)
 
-    extra = [f for f in _surprise_fields()
+    extra = [f for f in _surprise_fields() + list(FAMOUS_FIELDS)
              if all(abs(f[1] - w[1]) > 1e-3 or abs(f[2] - w[2]) > 1e-3 for w in WARM_FIELDS)]
     _WARM.update(surprise_total=len(extra), surprise_done=0, surprise_failed=0)
     todo, rnd = list(extra), 0
@@ -1106,7 +1107,7 @@ def nearest(ra: RA, dec: DEC, n: Annotated[int, Query(ge=1, le=10, description="
     Nothing is built or downloaded here.
     """
     if not _NAMED:
-        _NAMED.extend(WARM_FIELDS + _surprise_fields())
+        _NAMED.extend(WARM_FIELDS + _surprise_fields() + list(FAMOUS_FIELDS))
     best: dict = {}
     for fra, fdec, ffov in sorted(_ready_fields(), key=lambda f: abs(f[2] - 0.1)):   # one per position, 0.1° first
         best.setdefault((round(fra, 3), round(fdec, 3)), (fra, fdec, ffov))
