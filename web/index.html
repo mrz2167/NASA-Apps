@@ -1792,6 +1792,15 @@ canvas.addEventListener("click", async e=>{
   if(click!==S.clickId) return;
   S.lastObj=obj; renderFile(obj); renderSpectrum(obj); draw(); revealFile();
   if(obj.isTarget) track("selectTarget",{});
+  // catalogues were still answering: ask once more in the background and update the same card
+  if(S.apiFrames && obj.catalog_status==="pending"){
+    const sky=S.selSky, click=S.clickId, mover=isMover;
+    setTimeout(async()=>{
+      if(click!==S.clickId) return;
+      try{ const o2=await api.object(sky.ra, sky.dec, !mover); if(click!==S.clickId) return;
+        o2.isTarget=o2.status!=="star"; S.lastObj=o2; renderFile(o2); renderSpectrum(o2); draw(); }catch(e){}
+    }, 4000);
+  }
 });
 
 /* ---------- crew file card ---------- */
@@ -1816,7 +1825,8 @@ function compass(pa){ if(pa==null) return ""; const dirs=["N","NE","E","SE","S",
 function renderFile(o){
   const [vt,vs]=verdict(o);
   const marked = S.ctx==="training" && S.tr.marked && o.status==="candidate";
-  const statusTxt={known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
+  const catWait = !o.catalog && (o.catalog_status==="pending" || o.catalog_status==="unavailable");   // catalogues slow: don't call it unnamed
+  const statusTxt=catWait ? (o.catalog_status==="pending" ? "CHECKING CATALOGUES…" : "CATALOGUES NOT ANSWERING") : {known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
   const pm=o.motion||{}, arrow = pm.pa_deg!=null && isMoving(o) ? `<span class="arrow" style="transform:rotate(${-pm.pa_deg}deg)">↑</span> ${compass(pm.pa_deg)}` : "—";
   const cat = pm.catalog_arcsec_per_yr ? ` <span style="color:var(--muted-ink)">· catalogue ${pm.catalog_arcsec_per_yr}″/yr</span>` : "";
   const mols=Object.keys(MOLS).map(k=>{ const v=Math.max(0,o.molecules?.[k]||0), sign=v>=SIGN;
@@ -1830,7 +1840,7 @@ function renderFile(o){
       <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}`}</dd></div>
       <div><dt>Heading</dt><dd>${arrow}</dd></div>
       <div><dt>Brightness</dt><dd>${o.nospec?`<span style="color:var(--muted-ink)">not measured</span>`:(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
-      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
+      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):catWait?`<span style="color:var(--muted-ink)">${o.catalog_status==="pending"?"Still asking the star catalogues. Click the dot again in a few seconds.":"The star catalogues are not answering right now, so we can't tell yet whether this is known."}</span>`:o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
     </dl>
     ${o.nospec ? `<div class="fine">No chemistry here: these WISE photos show one colour only. Reading molecules takes a SPHEREx spectrum.</div>` : `<div class="mols">${mols}</div>`}
     <div class="verdict"><b>${vt}</b>${vs}</div>

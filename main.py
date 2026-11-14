@@ -15,7 +15,8 @@ import os
 import threading
 import time
 import warnings
-from collections import OrderedDict
+from collections import OrderedDict, deque
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Annotated, Literal
 
 import numpy as np
@@ -30,7 +31,7 @@ from PIL import Image
 
 from sky import SkyUnavailable, analyze, get_sky
 from render import fill_saturated, stretch_limits, to_uint8
-from identify import _centroid, _check_catalogs, gaia_cone, match_gaia, who_is_it
+from identify import _centroid, _check_catalogs, _deadline, gaia_cone, match_gaia, who_is_it
 from data import CACHE
 import skycache
 from astropy.table import Table
@@ -242,9 +243,12 @@ def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int
     dets = [det] if det else None
     key = (round(ra, 4), round(dec, 4), round(fov, 4), cadence, det)
     with _LOCK:
-        if key in _SKIES:
+        hit = _SKIES.get(key)
+        if hit is not None:
             _SKIES.move_to_end(key)
-            return _SKIES[key]
+    if hit is not None:
+        _start_gaia(hit)                      # no-op once loaded; retries a field whose Gaia failed a while ago
+        return hit
     sky = None
     if fov < 0.1:
         try:
@@ -291,11 +295,42 @@ def _remember(key: tuple, sky: dict) -> None:
         _SKIES[key] = sky
         _SKIES.move_to_end(key)
         while len(_SKIES) > _MAX_SKIES:
-            _SKIES.popitem(last=False)
+            _, old = _SKIES.popitem(last=False)
+            _forget(id(old))
+
+
+def _forget(sid: int) -> None:
+    """Drop everything computed for an evicted sky (call with _LOCK held): cards, analyses, catalogue
+    answers. They are keyed by id(sky), and Python may hand the same id to the next sky."""
+    try:
+        for store in (_OBJECTS, _ANALYSES, _PRE_SEEN):
+            for k in [k for k in list(store) if k[0] == sid]:
+                store.pop(k, None)
+        with _CAT_LOCK:
+            for k in [k for k in _CAT_DONE if k[0] == sid]:
+                _CAT_DONE.pop(k, None)
+    except Exception:
+        pass
 
 
 _GAIA: dict = {}          # ключ поля -> Table | None
 _GAIA_THREADS: dict = {}
+_GAIA_FAILED: dict = {}   # field key -> when its Gaia query last failed (tried again after GAIA_RETRY_S)
+_GAIA_DOWN_UNTIL = 0.0    # a Gaia query just failed or timed out: don't make clicks wait for the next ones
+GAIA_FIELD_TIMEOUT_S = 60.0   # normal answer is ~20 s; pyvo has no connect timeout of its own
+GAIA_RETRY_S = 180.0
+
+
+def _gaia_down() -> bool:
+    """Gaia comes through IRSA. True while IRSA is known not to answer (the exposure search fell back to
+    our own index, or a Gaia query has just failed)."""
+    if time.time() < _GAIA_DOWN_UNTIL:
+        return True
+    try:
+        from data import archive_status
+        return archive_status().get("irsa") == "down"
+    except Exception:
+        return False
 
 
 def _gaia_key(sky: dict) -> str:
@@ -306,22 +341,28 @@ def _gaia_key(sky: dict) -> str:
 def _start_gaia(sky: dict) -> None:
     """В фоне один раз загрузить Gaia DR3 для поля (диск-кэш cache/gaia/)."""
     key = _gaia_key(sky)
-    if key in _GAIA or key in _GAIA_THREADS:
+    if _GAIA.get(key) is not None or key in _GAIA_THREADS:
         return
     path = CACHE / "gaia" / f"{key}.ecsv"
     if path.exists():
         _GAIA[key] = Table.read(path)
         return
+    # IRSA down: a query would hang for minutes and every click in the field would wait for it
+    if time.time() - _GAIA_FAILED.get(key, 0.0) < GAIA_RETRY_S or _gaia_down():
+        return
 
     def job():
+        global _GAIA_DOWN_UNTIL
         try:
             radius = sky["size_deg"] / 2 * 1.45 * 3600  # описанный круг квадрата
-            t = gaia_cone(sky["coord"], radius, top=3000, gmax=20.5)
+            t = _deadline(lambda: gaia_cone(sky["coord"], radius, top=3000, gmax=20.5), GAIA_FIELD_TIMEOUT_S)
             path.parent.mkdir(parents=True, exist_ok=True)
             t.write(path, overwrite=True)
             _GAIA[key] = t
         except Exception:
             _GAIA[key] = None
+            _GAIA_FAILED[key] = time.time()
+            _GAIA_DOWN_UNTIL = time.time() + GAIA_RETRY_S
         finally:
             _GAIA_THREADS.pop(key, None)
 
@@ -568,6 +609,7 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
         molecules = a["scores"] or None
     except Exception:
         molecules = None
+    _precache(sky, imgs[-1], detector)        # object cards of the centre and the brightest dots, in the background
 
     return _clean({
         "size_px": int(sky["shape"][0]),
@@ -855,11 +897,15 @@ TARGET_NAMES_EN: dict[str, str] = {}   # названия тестовых об�
 
 def _analysis(sky: dict, coord: SkyCoord, online: bool = False) -> dict:
     key = (id(sky), round(coord.ra.deg, 5), round(coord.dec.deg, 5), online)
-    if key not in _ANALYSES:
-        _ANALYSES[key] = analyze(sky, coord=coord, online=online)
+    a = _ANALYSES.get(key)
+    if a is None:                             # requests and the precache thread both come here
+        a = _ANALYSES[key] = analyze(sky, coord=coord, online=online)
         while len(_ANALYSES) > 64:
-            _ANALYSES.popitem(last=False)
-    return _ANALYSES[key]
+            try:
+                _ANALYSES.popitem(last=False)
+            except KeyError:
+                break
+    return a
 
 
 def _snap(sky: dict, coord: SkyCoord, radius_px: int = 2) -> SkyCoord:
@@ -897,6 +943,123 @@ def _cached_object(sky: dict, x: float, y: float):
     return None
 
 
+# ---------- каталоги: вне запроса ----------
+# SIMBAD (and Gaia through IRSA) can take seconds, or tens of seconds when a service is slow. The lookup of
+# one object runs in a small pool, once (a second click joins the same lookup); the click waits for it
+# CATALOG_WAIT_S and otherwise returns the card with the spectrum and catalog_status "pending".
+CATALOG_WAIT_S = float(os.environ.get("SKYWATCH_CATALOG_WAIT", "6"))
+CATALOG_RETRY_S = 60.0     # "SIMBAD did not answer" is asked again after this long
+_CAT_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="catalog")
+_CAT_LOCK = threading.Lock()
+_CAT_JOBS: dict = {}                                   # (поле, x, y) -> Future, только пока идёт
+_CAT_DONE: "OrderedDict[tuple, tuple]" = OrderedDict()  # (поле, x, y) -> (ответ каталогов, время)
+_CAT_NOTE = {"pending": "catalogue lookup still running", "unavailable": "catalogues not answering right now"}
+
+
+def _catalog_job(sky: dict, coord: SkyCoord, okey: tuple) -> dict:
+    try:
+        cat = None
+        if _gaia_key(sky) in _GAIA_THREADS:           # Gaia of the field is on its way: it goes first, as before
+            cat = match_gaia(coord, _gaia_for(sky, wait_s=25.0))
+        if cat is None:
+            cat = _check_catalogs(coord, online=True, gaia=not _gaia_down())
+    except Exception:
+        cat = dict(_check_catalogs(coord, online=False), unavailable=True)
+    with _CAT_LOCK:
+        _CAT_DONE[okey] = (cat, time.time())
+        while len(_CAT_DONE) > 256:
+            _CAT_DONE.popitem(last=False)
+        _CAT_JOBS.pop(okey, None)
+    return cat
+
+
+def _catalog(sky: dict, coord: SkyCoord, okey: tuple, wait_s: float) -> tuple[dict, str]:
+    """Catalogue answer for an object and its state: "ok" (final), "pending" (still running after wait_s),
+    "unavailable" (SIMBAD did not answer; asked again in a minute)."""
+    with _CAT_LOCK:
+        done = _CAT_DONE.get(okey)
+        if done is not None and done[0].get("unavailable") and time.time() - done[1] > CATALOG_RETRY_S:
+            done = None
+        fut = None
+        if done is None:
+            fut = _CAT_JOBS.get(okey)
+            if fut is None:
+                fut = _CAT_JOBS[okey] = _CAT_POOL.submit(_catalog_job, sky, coord, okey)
+    if fut is not None:
+        try:
+            cat = fut.result(timeout=max(wait_s, 0.0))
+        except FutureTimeout:
+            return _check_catalogs(coord, online=False), "pending"
+        except Exception:
+            return _check_catalogs(coord, online=False), "unavailable"
+    else:
+        cat = done[0]
+    return cat, ("unavailable" if cat.get("unavailable") else "ok")
+
+
+# ---------- карточки заранее ----------
+# As soon as /api/frames has a field, one background thread computes the cards students click first: the
+# centre object and the brightest dots of the frame on screen. A click then finds the card ready; a click
+# that comes earlier computes its own card and shares the catalogue lookup (_CAT_JOBS).
+PRECACHE_N = int(os.environ.get("SKYWATCH_PRECACHE", "6"))    # brightest sources per field; 0 = off
+PRECACHE_BUDGET_S = 60.0
+_PRE_Q: deque = deque(maxlen=8)                               # fields waiting; when full the oldest is dropped
+_PRE_SEEN: "OrderedDict[tuple, bool]" = OrderedDict()         # (поле, детектор, размер) уже в очереди или готово
+_PRE_CV = threading.Condition()
+_PRE_THREAD: threading.Thread | None = None
+
+
+def _precache(shown: dict, img: np.ndarray, detector: int) -> None:
+    """Queue the cards of a field just sent to the site. Never blocks and never raises."""
+    global _PRE_THREAD
+    if PRECACHE_N <= 0:
+        return
+    try:
+        c = shown["coord"]
+        sky = _sky_containing(c.ra.deg, c.dec.deg)    # the sky a click in this field will resolve to
+        if sky is None:
+            return
+        key = (id(sky), detector, shown["shape"][0])
+        with _PRE_CV:
+            if key in _PRE_SEEN:
+                return
+            _PRE_SEEN[key] = True
+            while len(_PRE_SEEN) > 256:
+                _PRE_SEEN.popitem(last=False)
+            _PRE_Q.append((sky, shown, img))
+            if _PRE_THREAD is None or not _PRE_THREAD.is_alive():
+                _PRE_THREAD = threading.Thread(target=_precache_worker, name="precache", daemon=True)
+                _PRE_THREAD.start()
+            _PRE_CV.notify()
+    except Exception:
+        pass
+
+
+def _precache_worker() -> None:
+    while True:
+        with _PRE_CV:
+            while not _PRE_Q:
+                _PRE_CV.wait()
+            sky, shown, img = _PRE_Q.pop()            # newest first: that is the field on someone's screen now
+        try:
+            t0 = time.time()
+            ny = img.shape[0]
+            pts = [shown["coord"]] + [shown["wcs"].pixel_to_world(s["x"] - 0.5, ny - s["y"] - 0.5)
+                                      for s in _sources(img, n=PRECACHE_N)]
+            for c in pts:
+                with _LOCK:
+                    alive = any(s is sky for s in _SKIES.values())
+                if not alive or time.time() - t0 > PRECACHE_BUDGET_S:
+                    break                             # field evicted, or the catalogues are crawling
+                out = _object(float(c.ra.deg), float(c.dec.deg), wait_s=30.0, sky=sky)
+                if out.get("catalog_status") == "unavailable":
+                    break                             # SIMBAD is not answering: don't queue up behind it
+        except Exception as e:
+            print(f"[precache] skipped: {e!r}", flush=True)
+        finally:
+            sky = shown = img = None                  # don't pin an evicted field while idle
+
+
 @app.get("/api/object")
 def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected object, degrees (0–360).")],
         dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the selected object, degrees (−90…+90).")],
@@ -904,10 +1067,19 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected
     """Object card ("Who is it?") for a selected point: motion, brightness variability, spectrum, molecules,
     catalogue match (test targets, then Gaia DR3, then SIMBAD) and a plain-English verdict.
 
-    The point snaps to the nearest source unless `snap=0`. A cold request in a new field can take 15–25 s.
+    The point snaps to the nearest source unless `snap=0`. The card comes back within a few seconds: if the
+    catalogues are slower than that, `catalog_status` is `"pending"` (ask again, the lookup keeps running) or
+    `"unavailable"` (SIMBAD did not answer); `"ok"` means the catalogue answer is final.
     """
+    return _object(ra, dec, snap, CATALOG_WAIT_S)
+
+
+def _object(ra: float, dec: float, snap: bool = True, wait_s: float = 6.0, sky: dict | None = None) -> dict:
+    """The card itself. wait_s — how long to wait for the catalogue lookup (it runs in _CAT_POOL either way);
+    sky — the field, when the caller already has it (background precache)."""
     coord = SkyCoord(ra, dec, unit="deg")
-    sky = _sky_containing(ra, dec)
+    if sky is None:
+        sky = _sky_containing(ra, dec)
     if sky is None:
         try:
             sky = _load_sky(ra, dec, 0.1)
@@ -923,12 +1095,19 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected
         return hit
     a = _analysis(sky, coord, online=False)          # движение, спектр (быстро, без сети)
     card, m, v = a["card"], a["motion"], a["variability"]
+    cat_status = "ok"
     if not card["catalog_found"]:
         # каталоги: Gaia поля (загружается в фоне при запросе кадров) -> SIMBAD (зеркало)
-        cat = match_gaia(coord, _gaia_for(sky, wait_s=25.0))
+        cat = match_gaia(coord, _gaia_for(sky))
         if cat is None:
-            cat = _check_catalogs(coord, online=True)
+            # the network part runs in the background; a mover waits longer: "not in catalogues" would
+            # call it a candidate, and that had better be true
+            cat, cat_status = _catalog(sky, coord, okey, max(wait_s, 20.0) if card["moving"] else wait_s)
         card = who_is_it(coord, m, a["scores"], v, cat=cat)
+        if cat_status != "ok":
+            card["verdict"] = card["verdict"].replace(
+                "not found in catalogues", _CAT_NOTE[cat_status]).replace(
+                ": not in catalogues. CANDIDATE, needs checking", f": {_CAT_NOTE[cat_status]}")
     fl = [f for f in v.get("fluxes", []) if f > 0]
     ratio = round(max(fl) / min(fl), 2) if len(fl) >= 2 else 1.0
 
@@ -969,9 +1148,10 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected
         "spectrum": a["spectrum"],
         "verdict": card["verdict"],
         "simbad_url": card["simbad_url"],
+        "catalog_status": cat_status,
     })
     with _LOCK:
-        if snap:
+        if snap and cat_status == "ok":       # an unfinished lookup is not remembered: the next click completes it
             _OBJECTS[okey] = out
         while len(_OBJECTS) > 256:
             _OBJECTS.popitem(last=False)
