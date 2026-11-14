@@ -1180,10 +1180,10 @@ const api = {
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
+  object(ra,dec,snap=true){ return this.get("/api/object", snap?{ra,dec}:{ra,dec,snap:0}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
-  track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
+  track(ra,dec,f,det,snap=true){ return this.get("/api/track",Object.assign({ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}, snap?{}:{snap:0})); }
 };
 $("surpriseBig").onclick=()=>surprise();
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
@@ -1358,6 +1358,17 @@ async function scan(ra, dec, fov, key){
   if(!key && !S.field.target && !S.apiFrames) toast("Quiet patch", "Nothing moving here. Shift the coordinates a little and scan again.");
 }
 function computeFrames(){ S.frames = S.field.epochs.map((_,e)=>renderFrame(S.field, e, S.det)); S.apiFrames=null; }
+// Before the frames change (detector, cadence): the star list is rebuilt for the new frames, so keep the
+// selection as a grid position, drop the old path and ignore any path request still on its way.
+function freezeSelection(){
+  if(typeof S.selected==="number"){ const p=S.field?.stars[S.selected]; S.selected = p ? {x:p.x, y:p.y} : null; }
+  else if(S.selected && typeof S.selected==="object" && S.selected.mover!=null) S.selected={x:S.selected.x, y:S.selected.y};
+  S.track=null; S.trackReq=(S.trackReq||0)+1;
+}
+// After the switch: follow the same object again on the new frames.
+async function refollow(){
+  if(S.selSky && S.selected!=null && S.selected!=="target") await followTrack(S.selSky.ra, S.selSky.dec);
+}
 async function loadApiFrames(){
   const f=S.field;
   const data=await api.frames(f.ra,f.dec,f.fov,S.det,"blink");
@@ -1451,16 +1462,26 @@ bindSeg("detSeg","d", async d=>{
   if(S.lastObj) renderSpectrum(S.lastObj);   // move the highlighted detector band under the spectrum
   track("detector",{val:+d});
   if(!S.field) return;
-  if(S.apiFrames){ $("loading").classList.add("on"); try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
+  if(S.apiFrames){ $("loading").classList.add("on"); freezeSelection(); try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
   draw();
 });
 
 // Ask the server where the clicked object sits on each frame of the current detector.
+// Grid pixel (x right, y down, centre N/2) -> sky, same tangent-plane approximation the server's grid uses.
+function gridToSky(x, y){
+  const f=S.field, N=f.N, ddec=(N/2-y)*CONFIG.PIX_ARCSEC/3600, dra=-(x-N/2)*CONFIG.PIX_ARCSEC/3600/Math.cos(f.dec*Math.PI/180);
+  return {ra:((f.ra+dra)%360+360)%360, dec:f.dec+ddec};
+}
+// A mover's path on every frame: its own positions where it was seen, the nearest sighting elsewhere.
+function moverPath(c){
+  return Array.from({length:nE()},(_,e)=>{ let best=0, bd=1e9; c.frames.forEach((fr,k)=>{ const d=Math.abs(fr-e); if(d<bd){ bd=d; best=k; } }); return c.positions[best]; });
+}
 async function followTrack(ra, dec){
   const req = S.trackReq = (S.trackReq||0)+1;
   try{
     const t = await api.track(ra, dec, S.field, S.det);
-    if(req!==S.trackReq) return;              // a newer click or scan won
+    if(req!==S.trackReq) return;              // a newer click, scan or frame switch won
+    if((t.positions||[]).length!==nE()){ S.track=null; draw(); return; }   // answer for other frames
     S.track = {positions:t.positions, ra:t.ra, dec:t.dec};
     draw();
   }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
@@ -1472,17 +1493,23 @@ bindSeg("cadSeg","c", async c=>{
   $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
   if(!S.apiFrames) return;
   stop(); $("loading").classList.add("on");
-  try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); }
+  freezeSelection();
+  try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); }
   $("loading").classList.remove("on"); S.epoch=0; draw(); play();
 });
 
 /* ---------- selecting objects ---------- */
 function hitTest(gx, gy, rect){
-  const f=S.field, v=view(), tol=Math.max(1.6, 25*v.sw/rect.width);   // ~25 screen px
+  // ~25 screen px at any zoom (never less than ~1 grid px, about the size of a star)
+  const f=S.field, v=view(), tol=Math.max(0.9, 25*v.sw/rect.width);
   const nearest = o => Math.min(...Array.from({length:nE()},(_,e)=>{ const p=objPos(f,o,e); return Math.hypot(p.x-gx,p.y-gy); }));
   const cand=[];
   if(f.target) cand.push({kind:"target", d:nearest(f.target)});
   (f.extras||[]).forEach((o,i)=>cand.push({kind:o.kind, i, d:nearest(o)}));
+  // moving candidates (amber diamonds, "Every visit" frames): hit where they are drawn
+  const ml=S.movers?.field===f && S.cadence==="visit" ? (S.movers.list||[]) : [];
+  ml.forEach((c,i)=>{ const ds=c.positions.map(q=>Math.hypot(q.x-gx,q.y-gy)), k=ds.indexOf(Math.min(...ds));
+    if(k>=0) cand.push({kind:"mover", i, d:ds[k], at:c.positions[k]}); });
   cand.sort((a,b)=>a.d-b.d);
   if(cand[0] && cand[0].d<tol*1.3) return cand[0];
   let best=null, bd=tol;
@@ -1496,24 +1523,27 @@ canvas.addEventListener("click", async e=>{
   const hit=hitTest(gx, gy, rect);
   if(S.ctx==="training") return onTrainingHit(hit);
 
-  let pick = hit.kind==="target" ? "target" : hit.kind==="star" ? hit.i : null;
+  let pick = hit.kind==="target" ? "target" : hit.kind==="star" ? hit.i : hit.kind==="mover" ? {x:hit.at.x, y:hit.at.y, mover:hit.i} : null;
   if(pick==null && !S.apiFrames) return toast("Empty sky","Nothing bright enough there. Click right on a dot.");
   if(pick==null) pick={x:gx, y:gy};
   S.selected=pick; S.lastObj=null;
+  // where the selected object really is: the dot's centre, not the click (the server only snaps within 2 px)
+  const at = pick==="target" ? targetPos(S.field,S.epoch) : typeof pick==="number" ? S.field.stars[pick] : pick;
+  const isMover = typeof pick==="object" && pick.mover!=null;
   const click = S.clickId = (S.clickId||0)+1;   // answers for an older click are ignored
   let obj;
   if(S.apiFrames){
-    const N=S.field.N, ddec=(N/2-gy)*CONFIG.PIX_ARCSEC/3600, dra=-(gx-N/2)*CONFIG.PIX_ARCSEC/3600/Math.cos(S.field.dec*Math.PI/180);
+    const sky=gridToSky(at.x, at.y);
+    S.selSky=sky;   // the selected object's position (field reports, detector switches)
     // Trail and lenses follow the clicked object; clicking the field's own target goes back to it.
-    S.track=null;
-    if(pick==="target") S.trackReq=(S.trackReq||0)+1;
-    else followTrack(S.field.ra+dra, S.field.dec+ddec);
+    S.track=null; S.trackReq=(S.trackReq||0)+1;
+    if(isMover){ const c=S.movers.list[pick.mover]; S.track={positions:moverPath(c), ra:sky.ra, dec:sky.dec, mover:true}; }
+    else if(pick!=="target") followTrack(sky.ra, sky.dec);
     draw();
-    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // clicked position (field reports)
     fileStatus("Checking…", "Looking up how it moves, how it flickers and what it's made of.", true);
     // the first click on a new patch of sky reads every exposure there: say so instead of looking stuck
     const slow=setTimeout(()=>{ if(click===S.clickId) fileStatus("Calculating spectrum…", "First look at this patch of sky: we're reading every SPHEREx exposure of it. This can take up to a minute.", true); }, 6000);
-    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }
+    try{ obj=await api.object(sky.ra, sky.dec, !isMover); obj.isTarget = obj.status!=="star"; }
     catch(err){ if(click===S.clickId){ fileStatus("No answer", "The archive didn't reply ("+esc(err.message)+"). Tap the dot again."); toast("Archive unreachable", "Tap the dot again."); } return; }
     finally{ clearTimeout(slow); }
     // colour the clicked object on the lens map by its own spectrum (it may be too faint for the per-pixel map)

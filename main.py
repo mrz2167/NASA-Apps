@@ -457,17 +457,21 @@ def movers(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
 
 @app.get("/api/track")
 def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-          detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$")):
+          detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$"),
+          snap: bool = True):
     """Путь выбранного объекта по кадрам поля (fra, fdec, fov, detector) — для «Trail» и линз.
 
-    ra, dec — куда кликнули; клик притягивается к ближайшему источнику.
+    ra, dec — положение выбранного объекта (сайт шлёт центр точки, а не место клика);
+    snap=1 — притянуть к центру ближайшего источника, snap=0 — взять как есть (движущиеся кандидаты).
     positions идут в том же порядке, что frames в /api/frames с теми же параметрами.
     """
     try:
         sky = _load_sky(fra, fdec, fov, cadence, detector)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
-    coord = _snap(sky, SkyCoord(ra, dec, unit="deg"))
+    coord = SkyCoord(ra, dec, unit="deg")
+    if snap:
+        coord = _snap(sky, coord)
     imgs = [f[2] for _, f in _det_items(sky, detector)]
     return {"ra": round(float(coord.ra.deg), 6), "dec": round(float(coord.dec.deg), 6),
             "positions": _track(sky, imgs, coord)}
@@ -523,7 +527,7 @@ def _cached_object(sky: dict, x: float, y: float):
 
 
 @app.get("/api/object")
-def obj(ra: float, dec: float):
+def obj(ra: float, dec: float, snap: bool = True):
     coord = SkyCoord(ra, dec, unit="deg")
     sky = _sky_containing(ra, dec)
     if sky is None:
@@ -532,10 +536,11 @@ def obj(ra: float, dec: float):
         except SkyUnavailable as e:
             raise HTTPException(503, str(e))
 
-    coord = _snap(sky, coord)                         # клик -> центр ближайшего источника
+    if snap:                                          # snap=0: движущийся кандидат, не тянуть к звезде рядом
+        coord = _snap(sky, coord)                     # клик -> центр ближайшего источника
     ox, oy = (float(v) for v in sky["wcs"].world_to_pixel(coord))
     okey = (id(sky), round(ox, 2), round(oy, 2))
-    hit = _cached_object(sky, ox, oy)                 # повторный клик / прогретый объект: без SIMBAD
+    hit = _cached_object(sky, ox, oy) if snap else None   # повторный клик / прогретый объект: без SIMBAD
     if hit is not None:
         return hit
     a = _analysis(sky, coord, online=False)          # движение, спектр (быстро, без сети)
@@ -588,7 +593,8 @@ def obj(ra: float, dec: float):
         "simbad_url": card["simbad_url"],
     })
     with _LOCK:
-        _OBJECTS[okey] = out
+        if snap:
+            _OBJECTS[okey] = out
         while len(_OBJECTS) > 256:
             _OBJECTS.popitem(last=False)
     return out
