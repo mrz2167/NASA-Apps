@@ -316,7 +316,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           <button class="btn btn-amber btn-lg" id="startBtn">Start the game</button>
           <button class="btn btn-ghost btn-lg" id="freeBtn">Free exploration</button>
         </div>
-        <div class="gray">Training takes about 10 minutes · levels 1–4 use real WISE and SPHEREx frames, level 5 a practice sky</div>
+        <div class="gray">Training takes about 10 minutes · all five levels use real WISE and SPHEREx frames</div>
       </div>
       <div class="map">
         <div id="mapStar"></div>
@@ -591,8 +591,21 @@ const LEVELS = [
    teach:"You'll learn to check a find against the catalogue and file a report. Known objects get a name; unknown ones become candidates.",
    hint:"Tap each moving dot and read the Catalogue line in the panel on the right.",
    fact:"In 2020 Dan Caselden, a volunteer with the Backyard Worlds project, was searching for one brown dwarf and stumbled on another that regular search software had missed. It was nicknamed The Accident. It is 10–12 billion years old, and the James Webb telescope is studying it now.",
-   found:{t:"Both objects checked", x:"One was already in the catalogue, the other got candidate status. In training this is a practice candidate. Look for real ones in free exploration."}}
+   found:{t:"Both objects checked", x:"One was already in the catalogue, the other got candidate status. In training this is a practice candidate. Look for real ones in free exploration."},
+   // with the real frames (web/levels/l5_*.png): one real mover, no hints. {m} and {c} (measured and catalogue speed) come from training.json
+   real:{task:"Final exam. This is a real patch of sky, photographed five times from 2010 to 2024. Something in it moves. We won't tell you what or where.",
+     teach:"Work the way astronomers do: find the mover, check whether science already knows it, and file a field report. New to you doesn't always mean new to science.",
+     hint:"Stars stay put. One bright dot slides a little further in every photo. Drag the Epoch slider from the first photo to the last and compare.",
+     found:{t:"You found Gliese 570 D", x:"It's a brown dwarf 19 light-years away: too small to shine like a star, and about 500 °C hot. It looks fast only because it is so close: you measured {m}″ a year on these frames, the catalogue says {c}″. Astronomers found it in 2000 in the 2MASS sky survey; back then it was among the coolest brown dwarfs known. It belongs to the Gliese 570 star system; the pale streak is glare from a bright star outside the frame. Known to science, but you found it on your own."}}}
 ];
+// Level texts: level 5 has its own wording when it runs on the real frames.
+function levelText(n){
+  const L=LEVELS[n-1], r=TRAINING_DATA[n];
+  if(!(L.real && r?.obj?.motion)) return L;
+  const m=r.obj.motion;
+  return Object.assign({}, L, L.real, {found:{t:L.real.found.t, x:L.real.found.x.replace("{m}",m.arcsec_per_yr).replace("{c}",m.catalog_arcsec_per_yr)}});
+}
+const examReal = () => S.ctx==="training" && S.level===5 && !!S.field?.exam;
 
 /* Advanced cases (levels 6–10). Did-you-know texts are drafts — review before submission. */
 const CASES = [
@@ -861,7 +874,7 @@ function startLevel(n){
                        target:{positions:[{x,y},…]}, stars:[{x,y,f:1,det:[1,1,1,1,1,1]},…]}
    Positions are in grid pixels of a 48×48 field (x right, y down). Without an entry the level runs on the simulation. */
 const TRAINING_DATA = {};
-// Real frames for levels 1–4, cut once by make_training.py (web/levels/training.json). Over file:// or if the
+// Real frames for levels 1–5, cut once by make_training.py (web/levels/training.json). Over file:// or if the
 // file is missing, the levels run on the simulation.
 const TRAINING_READY = (location.protocol.startsWith("http")
   ? fetch("levels/training.json").then(r=>r.ok?r.json():{}).then(d=>Object.assign(TRAINING_DATA, d)).catch(()=>{})
@@ -909,11 +922,12 @@ function buildTraining(n){
   let gridN=N, realStars=null;
   if(real){
     epochs=real.epochs; target=Object.assign(target, real.target); sim=real.sim||"Real frames";
-    gridN=real.N||N; if(real.extras?.length || n===2) extras=(real.extras||[]).map(e=>Object.assign({sig:.42, bright:1.6, det:FLAT}, e));
+    gridN=real.N||N; if(real.extras?.length || n===2 || n===5) extras=(real.extras||[]).map(e=>Object.assign({sig:.42, bright:1.6, det:FLAT}, e));
     realStars=(real.stars||[]).map(p=>({x:p.x, y:p.y, f:1, det:FLAT, id:"Background star"}));
   }
   const avoid=[target, ...extras].flatMap(o=>o.positions);
   const field={N:gridN, seed:1000+n*97, stars:realStars || makeStars(N,1000+n*97,avoid), target:Object.assign({key:"train"+n, mol:target.mol||{}}, target), extras, epochs, sim, training:n, ra:0, dec:0, fov:gridN*(real?.pixel_arcsec||CONFIG.PIX_ARCSEC)/3600};
+  if(n===5 && real?.obj?.motion){ field.exam=true; field.ra=real.obj.ra; field.dec=real.obj.dec; }   // real sky, one real mover, no spectrum (WISE photos)
   return field;
 }
 
@@ -925,6 +939,9 @@ function trainingObj(n, which){
                     vtext:["Young star wrapped in ice","Its light passes through frozen CO₂ and CO in the disk and cloud around it."]};
   if(n===4) return {name:"The dot from Level 1", status:"candidate", catalog:null, motion:{arcsec_per_yr:null}, variability:{ratio:1},
                     molecules:{water:.12,methane:.02,co2:.82,co:.14}, spectrum:makeSpectrum({teff:5800, mol:{water:.12,methane:0,co2:.82,co:.14}}, 4404), isTarget:true};
+  const r5=n===5 && TRAINING_DATA[5]?.obj;
+  if(r5 && r5.motion) return {name:r5.name, status:"known", catalog:r5.catalog, training:true, nospec:true, motion:r5.motion, variability:{ratio:1}, molecules:{}, isTarget:true,
+                    vtext:["Fast mover, already catalogued",`It shifted about ${r5.shift_px} WISE pixels between ${r5.years[0]} and ${r5.years[1]}, and the catalogue has a name for it.`]};
   if(which==="target") return {name:"Known asteroid (training example)", status:"known", catalog:"Minor Planet Center · training example", training:true,
                     motion:{arcsec_per_yr:96, pa_deg:120, significant:true}, variability:{ratio:1.1}, molecules:{water:.03,methane:0,co2:.01,co:.02},
                     spectrum:makeSpectrum({teff:5800, mol:{}}, 5501), vtext:["Asteroid in our Solar System","Moves fast between frames and is already in the minor-planet catalogue."], isTarget:true};
@@ -935,7 +952,7 @@ function trainingObj(n, which){
 
 async function startTraining(n){
   await TRAINING_READY;
-  leavePlay(); const L=LEVELS[n-1];
+  leavePlay(); const L=levelText(n);
   S.ctx="training"; S.level=n; S.tr={checked:{}, marked:false, reported:false, lens:false, hintStage:0};
   show("play"); resetViewerState();
   $("freeHead").hidden=true;
@@ -959,8 +976,21 @@ async function startTraining(n){
 }
 
 function renderChecklist(){
+  if(examReal()) return renderExamList();
   const t=S.tr, items=[["a","Check the first mover",t.checked.target],["b","Check the second mover",t.checked.extra],["m","Mark the candidate",t.marked],["r","File a field report",t.reported]];
   $("taskExtra").innerHTML=`<ul class="checklist">${items.map(([k,txt,ok])=>`<li class="${ok?"ok":""}"><i></i>${txt}</li>`).join("")}</ul>`;
+}
+
+// Level 5 on real frames: one real mover. Find it, say whether science already knows it, report it.
+function renderExamList(){
+  const t=S.tr, items=[["a","Find the object that moves",t.checked.target],["m","Check the catalogue: did you find it first?",t.marked],["r","File a field report",t.reported]];
+  const quiz = t.checked.target && !t.marked ? `<div class="quiz"><span>Read the Catalogue line in its file. Did you find it first?</span>
+    <button class="btn btn-ghost" data-a="new">Yes, nobody has named it</button><button class="btn btn-ghost" data-a="known">No, science already knows it</button></div>` : "";
+  $("taskExtra").innerHTML=`<ul class="checklist">${items.map(([k,txt,ok])=>`<li class="${ok?"ok":""}"><i></i>${txt}</li>`).join("")}</ul>`+quiz;
+  $("taskExtra").querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{
+    if(b.dataset.a!=="known") return say("Look at the Catalogue line in its file: there is a name there. A discovery has no catalogue match.");
+    t.marked=true; renderExamList(); say("Right: known to science, new to you. Now press Field report in its file.", true); checkL5();
+  });
 }
 
 /* hints: a button after 60 s without any action; 1st press = words, 2nd = highlight the quarter */
@@ -968,7 +998,7 @@ function armHint(){ clearTimeout(S.tr.hintTimer); if(S.ctx!=="training" || !$("h
 $("vPlay").addEventListener("pointerdown", ()=>{ if(S.ctx==="training") armHint(); });
 $("hintBtn").onclick=()=>{
   S.tr.hintStage++;
-  if(S.tr.hintStage===1){ $("hintText").textContent=LEVELS[S.level-1].hint; $("hintBtn").textContent="Show me where"; }
+  if(S.tr.hintStage===1){ $("hintText").textContent=levelText(S.level).hint; $("hintBtn").textContent="Show me where"; }
   else { S.hintQuad=true; draw(); $("hintBtn").hidden=true; }
 };
 
@@ -992,6 +1022,15 @@ function onTrainingHit(hit){
     if(hit.kind==="target") return say(t.lens ? "Yes, that's our dot. Now answer the question above." : "Yes, that's the dot from Level 1. Now switch the lenses below.", true);
     return say(TRAINING_DATA[4] ? "That one's a background star. Our young star is the one in the middle." : "That one's a star. Our dot is the fuzzy one that moves.");
   }
+  if(n===5 && S.field.exam){
+    if(hit.kind==="target"){
+      S.selected="target"; t.checked.target=true; draw();
+      const o=trainingObj(5,"target"); S.lastObj=o; renderFile(o); renderSpectrum(o); renderChecklist(); revealFile();
+      say(t.marked ? "That's the mover. Press Field report in its file." : "You found the mover. Read the Catalogue line in its file, then answer the question above.", true);
+      return checkL5();
+    }
+    return say(hit.kind==="star" ? "That dot stays put in all five photos: it's a distant star. Look for one that slides." : "Nothing there. Tap right on a dot.");
+  }
   if(n===5){
     if(hit.kind==="target" || hit.kind==="candidate"){
       const key = hit.kind==="target" ? "target" : "extra";
@@ -1004,9 +1043,10 @@ function onTrainingHit(hit){
     return say(hit.kind==="star" ? "That dot stays put: it's a star. Look for the two that move." : "Nothing there. Tap right on a dot.");
   }
 }
-function checkL5(){ const t=S.tr; if(t.checked.target && t.checked.extra && t.marked && t.reported) setTimeout(winLevel, 400); }
+function checkL5(){ const t=S.tr; if(t.checked.target && (t.checked.extra || examReal()) && t.marked && t.reported) setTimeout(winLevel, 400); }
 
 function onTrainingLens(l){
+  if(examReal()){ if(l!=="none" && !S.tr.finished) say("These WISE photos show one colour only, so the lenses have nothing to read here."); return; }
   if(S.level!==4 || S.tr.finished) return;
   if(l==="none") return;
   if(l==="co" && TRAINING_DATA[4]){ say("A little CO ice too. But another lens lights it up even more. Try it."); return; }
@@ -1041,7 +1081,7 @@ function completeLevel(n){
 // The level is won: say so in the task box above the viewer, and leave the viewer on screen so the
 // player sees what they just did. The star celebration opens only when they ask for it.
 function showWin(n, first){
-  const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
+  const L = n<=5 ? levelText(n).found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
   const kicker = (n<=5 ? `Training ${n} of 5` : `Case ${n-5} of 5`) + " complete" + (first ? ` · +${XP_FOR(n)} XP` : "");
   say("");
   $("hintBtn").hidden=true; $("hintRow").hidden=true;
@@ -1059,7 +1099,7 @@ function showWin(n, first){
 }
 
 function openFound(n, first){
-  const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
+  const L = n<=5 ? levelText(n).found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
   const animStar = first && n!==5;   // level 5: the “Training complete” screen lights the fifth point
   $("foundStarBox").hidden = n===5 && first;
   $("foundStar").innerHTML = starSVG({anim: animStar ? n : null});
@@ -1320,7 +1360,9 @@ function drawLensOutline(img, N){
 function drawOverlays(){
   const f=S.field, W=canvas.width, px=W/view().sw;
   if(S.hintQuad && f.target){
-    const p=targetPos(f,0), qx=p.x<f.N/2?0:.5, qy=p.y<f.N/2?0:.5, a=toCanvas(qx*f.N,qy*f.N), b=toCanvas((qx+.5)*f.N,(qy+.5)*f.N);
+    // exam field: the path crosses the middle of the frame, so the box is centred on the path instead of a quarter
+    const p=targetPos(f,0), pe=targetPos(f,nE()-1), mid=v=>Math.min(.5,Math.max(0,v/f.N-.25));
+    const qx=f.exam?mid((p.x+pe.x)/2):p.x<f.N/2?0:.5, qy=f.exam?mid((p.y+pe.y)/2):p.y<f.N/2?0:.5, a=toCanvas(qx*f.N,qy*f.N), b=toCanvas((qx+.5)*f.N,(qy+.5)*f.N);
     ctx.save(); ctx.fillStyle="rgba(246,181,68,.08)"; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);
     ctx.setLineDash([8,6]); ctx.strokeStyle="rgba(246,181,68,.8)"; ctx.lineWidth=2; ctx.strokeRect(a.x+1,a.y+1,b.x-a.x-2,b.y-a.y-2); ctx.restore();
   }
@@ -1336,7 +1378,7 @@ function drawOverlays(){
   }
   // lens glow on the target (object-level lens: driven by its spectrum, not by pixels)
   const tt=pathOf(f);
-  if(tt && S.lens!=="none"){
+  if(tt && S.lens!=="none" && !f.exam){
     const tp=objPos(f,tt,S.epoch), p=toCanvas(tp.x,tp.y);
     const mol = tt===f.target ? (tt.mol||{}) : (S.lastObj?.molecules||{});
     const sc=mol[S.lens]||0, col=MOLS[S.lens].color, cl=(tt===f.target && tt.cloud)||1;
@@ -1357,6 +1399,7 @@ function drawOverlays(){
   if(S.mode==="trail"){
     for(const o of [tt, ...(f.extras||[])]){
       if(!o || o.moving===false) continue;
+      if(f.exam && !S.tr.checked?.target) continue;   // final exam: the trail is drawn only for a mover the student has found
       const pts=Array.from({length:nE()},(_,e)=>{ const q=objPos(f,o,e); return toCanvas(q.x,q.y); });
       ctx.save(); ctx.strokeStyle="#E0352B"; ctx.lineWidth=2; ctx.shadowColor="#F07A3A"; ctx.shadowBlur=8;
       ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
@@ -1563,7 +1606,8 @@ $("speedIn").oninput=e=>{ S.speed=1600-(+e.target.value); if(S.playing) play(); 
 $("epochIn").oninput=e=>{ if(!S.field) return; stop(); S.epoch=+e.target.value; draw(); P.epochSteps++; save(); track("epochStep",{}); };
 
 function bindSeg(id, attr, fn){ $(id).addEventListener("click", e=>{ const b=e.target.closest("button"); if(!b) return; [...$(id).children].forEach(x=>x.classList.toggle("on",x===b)); fn(b.dataset[attr]); }); }
-bindSeg("modeSeg","m", m=>{ S.mode=m; if(S.field) draw(); track("mode",{val:m}); if(!P.tips.mode){ P.tips.mode=true; save(); } $("modeTip").hidden=true; });
+bindSeg("modeSeg","m", m=>{ S.mode=m; if(S.field) draw(); track("mode",{val:m});
+  if(m==="trail" && examReal() && !S.tr.checked.target) say("Trail draws the path of an object you have picked. Find the mover first, then tap it."); if(!P.tips.mode){ P.tips.mode=true; save(); } $("modeTip").hidden=true; });
 bindSeg("zoomSeg","z", z=>{ S.zoom=+z; if(S.field) draw(); track("zoom",{val:+z}); });
 // Per-pixel molecule maps of the field (real data): fetched once per field, on the first lens switch.
 async function ensureLens(){
@@ -1745,12 +1789,12 @@ function renderFile(o){
     <dl class="rows">
       <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}`}</dd></div>
       <div><dt>Heading</dt><dd>${arrow}</dd></div>
-      <div><dt>Brightness</dt><dd>${(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
+      <div><dt>Brightness</dt><dd>${o.nospec?`<span style="color:var(--muted-ink)">not measured</span>`:(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
       <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
     </dl>
-    <div class="mols">${mols}</div>
+    ${o.nospec ? `<div class="fine">No chemistry here: these WISE photos show one colour only. Reading molecules takes a SPHEREx spectrum.</div>` : `<div class="mols">${mols}</div>`}
     <div class="verdict"><b>${vt}</b>${vs}</div>
-    <div class="fine">Signs, not proof. Low-resolution spectra flag molecules; confirming them takes follow-up observations.</div>
+    ${o.nospec ? "" : `<div class="fine">Signs, not proof. Low-resolution spectra flag molecules; confirming them takes follow-up observations.</div>`}
     <div class="file-actions">
       ${inL5 && o.status==="candidate" && !S.tr.marked ? `<button class="btn btn-red" id="markBtn">Mark as candidate</button>` : ""}
       <button class="btn ${inL5 && o.status==="candidate" && !S.tr.marked ? "btn-ghost" : "btn-red"}" id="reportBtn">Field report</button>
@@ -1766,9 +1810,9 @@ function revealFile(){ const r=$("file").getBoundingClientRect(); if(r.top > inn
 function resetFile(){ $("file").innerHTML=`<div class="file-empty"><span class="label">Who is it?</span><div class="display">Tap a dot.</div><div style="color:var(--muted-ink);font-size:14px">We'll check how it moves, how it flickers, what it's made of, and whether any catalogue already knows its name.</div></div>`; }
 
 /* ---------- spectrum ---------- */
-function clearSpectrum(){ $("specSvg").innerHTML=`<text x="300" y="130" text-anchor="middle" fill="rgba(243,238,228,.45)" font-size="13" font-family="Manrope">Select an object to read its light</text>`; $("specLabel").textContent="no object"; }
+function clearSpectrum(msg){ $("specSvg").innerHTML=`<text x="300" y="130" text-anchor="middle" fill="rgba(243,238,228,.45)" font-size="13" font-family="Manrope">${msg||"Select an object to read its light"}</text>`; $("specLabel").textContent=msg?"no spectrum":"no object"; }
 function renderSpectrum(o){
-  const sp=o.spectrum; if(!sp) return clearSpectrum();
+  const sp=o.spectrum; if(!sp) return clearSpectrum(o.nospec ? "No spectrum: WISE photos show one colour only" : "");
   const W=600,H=260,L=44,R=14,T=16,B=46, x=l=>L+(l-.75)/(5-.75)*(W-L-R);
   // Faint objects give negative fluxes (noise after background subtraction): the axis starts at 0,
   // such points sit on it as hollow dots ("no light detected here") instead of falling below the chart.
@@ -1807,13 +1851,13 @@ async function openReport(o){
   txt(g,"LUMEN",80,130,"700 54px Unbounded","#F3EEE4",14);
   txt(g,"SPACE ACADEMY",82,170,"600 18px Manrope","rgba(243,238,228,.55)",5);
   const train = S.field?.training;
-  txt(g,train?"FIELD REPORT · TRAINING":"FIELD REPORT · NASA SPHEREx DATA",80,300,"600 22px Manrope","#F6B544",6);
+  txt(g,S.field?.exam?"FIELD REPORT · TRAINING · NASA WISE DATA":train?"FIELD REPORT · TRAINING":"FIELD REPORT · NASA SPHEREx DATA",80,300,"600 22px Manrope","#F6B544",6);
   const title=objTitle(o, train).toUpperCase(); g.font="200 76px Unbounded";
   const words=title.split(" "); let line_="", yy=400; for(const w of words){ const tst=line_?line_+" "+w:w; if(g.measureText(tst).width>900 && line_){ txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4"); line_=w; yy+=88; } else line_=tst; } txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4");
   yy+=80; const [vt]=verdict(o);
   txt(g,vt,80,yy,"600 32px Manrope","#F07A3A");
-  const f=S.field; const rows=[["FIELD", train?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
-    ["CHEMISTRY", Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
+  const f=S.field; const rows=[["FIELD", train && !f.exam?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
+    ["CHEMISTRY", o.nospec ? "not measured (WISE photos)" : Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
   yy+=70; for(const [k,v] of rows){ txt(g,k,80,yy,"600 18px Manrope","rgba(243,238,228,.5)",5); txt(g,v,330,yy,"400 28px Manrope","#F3EEE4"); yy+=58; }
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;
@@ -1826,7 +1870,7 @@ async function openReport(o){
   $("reportModal").classList.add("on");
   if(S.ctx==="training" && S.level===5){
     if(S.tr.marked){ S.tr.reported=true; renderChecklist(); checkL5(); }
-    else say("First check both movers and mark the candidate, then file the report.");
+    else say(examReal() ? "First answer the question above the sky, then file the report." : "First check both movers and mark the candidate, then file the report.");
   }
 }
 $("sendReport").onclick=async()=>{
