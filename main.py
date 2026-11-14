@@ -388,6 +388,7 @@ def health():
     import wise as _wise_mod
     problems = []
     try:
+        CACHE.mkdir(parents=True, exist_ok=True)      # a fresh checkout (CI) has no cache folder yet
         du = shutil.disk_usage(CACHE)
         disk = {"free_gb": round(du.free / 1e9, 1), "used_gb": round(du.used / 1e9, 1)}
         if du.free < 0.3e9:
