@@ -326,6 +326,43 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
     })
 
 
+LENS_RGB = {"water": (0x3D, 0x5B, 0xD9), "methane": (0xF0, 0x7A, 0x3A),
+            "co2": (0xF6, 0xB5, 0x44), "co": (0xE0, 0x35, 0x2B)}   # цвета линз сайта
+
+
+def _lens_png(depth: np.ndarray, rgb) -> str:
+    """Карта глубины -> PNG цвета молекулы с прозрачностью: от 0.08 (едва) до 0.43+ (полностью)."""
+    a = np.clip((np.nan_to_num(depth) - 0.08) / 0.35, 0, 1)
+    img = np.zeros(depth.shape + (4,), np.uint8)
+    img[..., :3] = rgb
+    img[..., 3] = (a * 235).astype(np.uint8)
+    return _png_uri(img)
+
+
+@app.get("/api/lens")
+def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5)):
+    """Карты молекул поля: где на картинке поглощение воды, метана, CO₂, CO сильнее, чем у соседей.
+
+    Та же сетка и ориентация, что у кадров /api/frames с теми же ra, dec, fov.
+    maps — PNG с прозрачностью для наложения; peak — самая глубокая полоса в поле (0..1);
+    lit — сколько пикселей заметно светится.
+    """
+    from lens import molecule_maps
+    try:
+        sky = _load_sky(ra, dec, fov)
+    except SkyUnavailable as e:
+        raise HTTPException(503, str(e))
+    if "_lens" not in sky:   # считается один раз на поле и живёт вместе с ним в кэше _SKIES
+        maps = molecule_maps(sky)
+        sky["_lens"] = _clean({
+            "size_px": int(sky["shape"][0]),
+            "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in maps.items()},
+            "peak": {k: round(float(np.nanmax(v)), 3) if np.isfinite(v).any() else 0.0 for k, v in maps.items()},
+            "lit": {k: int(np.sum(np.nan_to_num(v) >= 0.2)) for k, v in maps.items()},
+        })
+    return sky["_lens"]
+
+
 @app.get("/api/track")
 def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
           detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$")):

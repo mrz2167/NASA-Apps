@@ -146,6 +146,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .hud{position:absolute;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:600;text-shadow:0 1px 4px #000}
 .hud.top{top:10px}.hud.bottom{bottom:10px}
 .hud .hot{color:var(--amber)}
+.lens-note{position:absolute;left:12px;top:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--paper)}
 .scalebar{display:flex;align-items:center;gap:6px}
 .scalebar i{display:block;height:2px;background:var(--paper)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;color:var(--muted)}
@@ -352,6 +353,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
         <div class="stage" id="stage">
           <canvas id="sky" width="720" height="720" aria-label="Sky viewer"></canvas>
           <div class="hud top"><span id="hudEpoch">—</span><span class="hot" id="hudMode">BLINK</span></div>
+          <div class="lens-note" id="lensNote" hidden></div>
           <div class="hud bottom"><span id="hudDet">—</span><span class="scalebar"><i id="scaleI" style="width:40px"></i><span id="scaleT">30″</span></span></div>
           <div class="empty" id="emptyState">
             <div class="display">Pick a patch of sky.</div>
@@ -1071,6 +1073,7 @@ const api = {
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
   object(ra,dec){ return this.get("/api/object",{ra,dec}, 20000); },
+  lens(f){ return this.get("/api/lens",{ra:f.ra,dec:f.dec,fov:f.fov}); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
 };
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
@@ -1089,6 +1092,12 @@ function draw(){
   if(S.apiFrames){
     const fr = S.mode==="diff" && S.apiFrames.diff ? S.apiFrames.diff[S.epoch] : S.apiFrames.frames[S.epoch];
     if(fr && fr.img) ctx.drawImage(fr.img, v.sx*fr.img.width/N, v.sy*fr.img.height/N, v.sw*fr.img.width/N, v.sw*fr.img.height/N, 0,0,W,W);
+    // molecule lens: dim the sky a little and paint where the light dips in that molecule's band
+    const lm = S.lens!=="none" && S.mode!=="diff" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
+    if(lm){
+      ctx.fillStyle="rgba(7,10,32,.45)"; ctx.fillRect(0,0,W,W);
+      ctx.drawImage(lm, v.sx*lm.width/N, v.sy*lm.height/N, v.sw*lm.width/N, v.sw*lm.height/N, 0,0,W,W);
+    }
   } else {
     if(off.width!==N){ off.width=N; off.height=N; }
     const id=octx.createImageData(N,N), cur=S.frames[S.epoch], ref=S.frames[0];
@@ -1116,6 +1125,17 @@ function drawOverlays(){
     ctx.save(); ctx.fillStyle="rgba(246,181,68,.08)"; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);
     ctx.setLineDash([8,6]); ctx.strokeStyle="rgba(246,181,68,.8)"; ctx.lineWidth=2; ctx.strokeRect(a.x+1,a.y+1,b.x-a.x-2,b.y-a.y-2); ctx.restore();
   }
+  { // lens status (HTML, so it stays readable on phones)
+    let msg="", col="";
+    if(S.lens!=="none" && S.apiFrames){
+      const sym=MOLS[S.lens].sym, lm=S.lensMaps?.field===f ? S.lensMaps : null;
+      if(S.mode==="diff") msg=`${sym} map: switch to Blink to see it`;
+      else if(lm && lm.lit[S.lens]>0){ msg=`Coloured where the light dips in the ${sym} band`; col=MOLS[S.lens].color; }
+      else if(lm) msg=`No ${sym} signs in this field`;
+      else if(S.lensLoading===f) msg=`Reading the spectra for the ${sym} map…`;
+    }
+    const n=$("lensNote"); n.hidden=!msg; n.textContent=msg; n.style.color=col||"";
+  }
   // lens glow on the target (object-level lens: driven by its spectrum, not by pixels)
   const tt=pathOf(f);
   if(tt && S.lens!=="none"){
@@ -1129,7 +1149,7 @@ function drawOverlays(){
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,px*4.5*cl,0,7); ctx.fill();
       ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       label(`${MOLS[S.lens].sym} SIGN ${sc.toFixed(2)}`, p.x+px*3, p.y-px*3, col);
-    } else {
+    } else if(!(S.lensMaps?.field===f && S.mode!=="diff")){   // with the per-pixel map on, the colours speak for themselves
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
       label(checking ? `${MOLS[S.lens].sym} · checking…` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
@@ -1177,7 +1197,7 @@ function updateHud(){
 
 /* ---------- loading a field (cases & free) ---------- */
 async function scan(ra, dec, fov, key){
-  stop(); S.selected=null; S.ring=null; S.track=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
+  stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
   $("emptyState").style.display="none"; $("loading").classList.add("on");
   try{
@@ -1216,7 +1236,20 @@ $("epochIn").oninput=e=>{ if(!S.field) return; stop(); S.epoch=+e.target.value; 
 function bindSeg(id, attr, fn){ $(id).addEventListener("click", e=>{ const b=e.target.closest("button"); if(!b) return; [...$(id).children].forEach(x=>x.classList.toggle("on",x===b)); fn(b.dataset[attr]); }); }
 bindSeg("modeSeg","m", m=>{ S.mode=m; if(S.field) draw(); track("mode",{val:m}); if(!P.tips.mode){ P.tips.mode=true; save(); } $("modeTip").hidden=true; });
 bindSeg("zoomSeg","z", z=>{ S.zoom=+z; if(S.field) draw(); track("zoom",{val:+z}); });
-bindSeg("lensSeg","l", l=>{ S.lens=l; if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
+// Per-pixel molecule maps of the field (real data): fetched once per field, on the first lens switch.
+async function ensureLens(){
+  const f=S.field;
+  if(!S.apiFrames || !f || S.lensMaps?.field===f || S.lensLoading===f) return;
+  S.lensLoading=f; draw();
+  try{
+    const d=await api.lens(f), imgs={};
+    for(const k in d.maps) imgs[k]=await loadImg(d.maps[k]);
+    if(S.field===f) S.lensMaps={field:f, imgs, peak:d.peak, lit:d.lit};
+  }catch(e){ if(S.field===f) toast("Lens map unavailable", e.message); }
+  if(S.lensLoading===f) S.lensLoading=null;
+  if(S.field===f) draw();
+}
+bindSeg("lensSeg","l", l=>{ S.lens=l; if(l!=="none") ensureLens(); if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
 $("detSeg").innerHTML = DETECTORS.map(d=>`<button data-d="${d.id}" class="${d.id===S.det?"on":""}">D${d.id}</button>`).join("");
 $("detHint").textContent = DETECTORS[S.det-1].range;
 bindSeg("detSeg","d", async d=>{

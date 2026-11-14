@@ -100,6 +100,33 @@ The frontend writes the verdict itself from these numbers (moving + methane → 
 
 ---
 
+## 3. `GET /api/lens`
+
+Per-pixel molecule maps for the molecule lenses: where on the picture the light dips in the water, methane,
+CO₂ or CO band more than for the neighbouring stars.
+
+**Query:** `ra`, `dec`, `fov` — same as `/api/frames`; the maps lie on the same grid and orientation.
+
+**Response:**
+
+```json
+{
+  "size_px": 59,
+  "maps": {"water": "data:image/png;base64,...", "methane": "...", "co2": "...", "co": "..."},
+  "peak": {"water": 0.51, "methane": 0.77, "co2": 0.26, "co": 0.31},
+  "lit":  {"water": 16, "methane": 15, "co2": 9, "co": 7}
+}
+```
+
+- `maps`: transparent PNGs in the lens colour; opacity grows with band depth (from 0.08, full at ≥ 0.43).
+  The site dims the frame and draws the map on top.
+- `peak`: deepest band in the field (0–1); `lit`: pixels with depth ≥ 0.2.
+- How (`lens.py`): every SPHEREx exposure sees each pixel at its own wavelength, so all exposures of the field
+  give each pixel a coarse spectrum. Depth = 1 − band / continuum (straight line between the two continuum
+  windows of `spectrum.BANDS`), minus the field's median depth (PSF and calibration offsets shared by all stars).
+  Only pixels well above the background, away from saturated stars. A sign, not proof; numbers differ from the
+  object card's indices, which use a different continuum.
+
 ## Minimal FastAPI skeleton
 
 ```python
