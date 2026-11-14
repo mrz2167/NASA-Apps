@@ -53,6 +53,15 @@ def site():
     return FileResponse(WEB / "index.html")
 
 
+@app.get("/levels/{name}", include_in_schema=False)
+def level_file(name: str):
+    """Реальные кадры учебных уровней (make_training.py -> web/levels/)."""
+    import re
+    if not re.fullmatch(r"[a-z0-9_]+\.(png|json)", name) or not (WEB / "levels" / name).is_file():
+        raise HTTPException(404, "нет такого файла")
+    return FileResponse(WEB / "levels" / name)
+
+
 # ---------- кэш наборов кадров ----------
 
 _SKIES: "OrderedDict[tuple, dict]" = OrderedDict()

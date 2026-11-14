@@ -553,7 +553,7 @@ const LEVELS = [
    teach:"You'll learn the blink method: stars stay put, nearby objects shift.",
    hint:"Don't stare at one dot. Relax your eyes and let the movement jump out at you.",
    fact:"On 18 February 1930, 24-year-old Clyde Tombaugh was flipping between two photos of the sky taken six days apart when he noticed a jumping dot. It was Pluto. Tombaugh was a farm boy with no university degree.",
-   found:{t:"You found something that moves", x:"What it is, you'll find out in Level 4."}},
+   found:{t:"You found something that moves", x:"It's WISE 0855, the coldest brown dwarf known: about as cold as the North Pole, only 7.4 light-years away. Between these two WISE photos, 2010 and 2024, it crossed almost two arcminutes of sky."}},
   {n:2, title:"False Alarm",
    task:"Two dots are blinking. Only one of them is real. Find it.",
    teach:"You'll learn to tell a real object from a glitch: real ones travel in a straight line, glitches flash once or blink in place.",
@@ -565,13 +565,13 @@ const LEVELS = [
    teach:"You'll learn long-term watching: nearby stars and brown dwarfs drift so slowly that it only shows over years.",
    hint:"Move the Epoch slider to both ends: the oldest and the newest photo.",
    fact:"Luhman 16 is only 6.5 light-years away, yet nobody found it until 2013: it was lost among thousands of Milky Way stars. Astronomer Kevin Luhman spotted it by its motion in images from NASA's WISE telescope.",
-   found:{t:"You found Luhman 16", x:"Two brown dwarfs, the third-closest system to the Sun. It drifts 2.79″ a year: about 7 SPHEREx pixels between 2010 and 2025."}},
+   found:{t:"You found Luhman 16", x:"Two brown dwarfs, the third-closest system to the Sun. It drifts 2.79″ a year: about 14 WISE pixels between 2010 and 2024."}},
   {n:4, title:"Ingredients of Space",
-   task:"Remember the dot from Level 1? Switch the lenses and find out what it's made of.",
+   task:"This young star is still hidden inside the cold cloud it was born in. Switch the lenses and find out what the ice around it is made of.",
    teach:"You'll learn to read what things are made of from their light. A dip in the spectrum is a sign, not proof.",
    hint:"Look at the spectrum: where do the dots drop sharply inside a coloured band?",
    fact:"Helium, the gas in party balloons, was found on the Sun before it was found on Earth. During an eclipse in 1868 astronomers saw a yellow line from an unknown element in the Sun's spectrum. Helium turned up on Earth only 27 years later.",
-   found:{t:"You found 3I/ATLAS", x:"You just studied the interstellar comet 3I/ATLAS, only the third object ever seen arriving from another star system. SPHEREx found a huge cloud of CO₂ around it."}},
+   found:{t:"You found CO₂ ice", x:"CRBR 2422.8-3423 is a newborn star in Ophiuchus, seen through the edge of its own disk. Its light passes through frozen CO₂ and CO: the same ices that later end up in comets and planets. Mapping these ices across the sky is one of SPHEREx's main jobs."}},
   {n:5, title:"Did I Find You First?",
    task:"Two moving objects. Check both: does science already know them?",
    teach:"You'll learn to check a find against the catalogue and file a report. Known objects get a name; unknown ones become candidates.",
@@ -828,6 +828,11 @@ function startLevel(n){
                        target:{positions:[{x,y},…]}, stars:[{x,y,f:1,det:[1,1,1,1,1,1]},…]}
    Positions are in grid pixels of a 48×48 field (x right, y down). Without an entry the level runs on the simulation. */
 const TRAINING_DATA = {};
+// Real frames for levels 1–4, cut once by make_training.py (web/levels/training.json). Over file:// or if the
+// file is missing, the levels run on the simulation.
+const TRAINING_READY = (location.protocol.startsWith("http")
+  ? fetch("levels/training.json").then(r=>r.ok?r.json():{}).then(d=>Object.assign(TRAINING_DATA, d)).catch(()=>{})
+  : Promise.resolve());
 
 function makeStars(N, seed, avoid){
   const r=mulberry(seed), stars=[], count=Math.round(N*N*0.016);
@@ -868,14 +873,23 @@ function buildTraining(n){
     extras.push({kind:"candidate", positions:line(36,34,-1.4,-1.1,4), sig:.85, bright:.8, det:FLAT, moving:true});
   }
   const real=TRAINING_DATA[n];
-  if(real){ epochs=real.epochs; target=Object.assign(target, real.target); sim="Real NASA SPHEREx frames"; }
+  let gridN=N, realStars=null;
+  if(real){
+    epochs=real.epochs; target=Object.assign(target, real.target); sim=real.sim||"Real frames";
+    gridN=real.N||N; if(real.extras?.length || n===2) extras=(real.extras||[]).map(e=>Object.assign({sig:.42, bright:1.6, det:FLAT}, e));
+    realStars=(real.stars||[]).map(p=>({x:p.x, y:p.y, f:1, det:FLAT, id:"Background star"}));
+  }
   const avoid=[target, ...extras].flatMap(o=>o.positions);
-  const field={N, seed:1000+n*97, stars:real?.stars || makeStars(N,1000+n*97,avoid), target:Object.assign({key:"train"+n, mol:target.mol||{}}, target), extras, epochs, sim, training:n, ra:0, dec:0, fov:N*CONFIG.PIX_ARCSEC/3600};
+  const field={N:gridN, seed:1000+n*97, stars:realStars || makeStars(N,1000+n*97,avoid), target:Object.assign({key:"train"+n, mol:target.mol||{}}, target), extras, epochs, sim, training:n, ra:0, dec:0, fov:gridN*(real?.pixel_arcsec||CONFIG.PIX_ARCSEC)/3600};
   return field;
 }
 
 /* data the panels show for training objects */
 function trainingObj(n, which){
+  const r4=TRAINING_DATA[4]?.obj;
+  if(n===4 && r4) return {name:"CRBR 2422.8-3423", kind:"Young star in an icy cloud", status:"known", catalog:"SIMBAD · CRBR 2422.8-3423 · embedded protostar (Ophiuchus)",
+                    motion:{arcsec_per_yr:null}, variability:{ratio:1}, molecules:r4.molecules, spectrum:r4.spectrum, isTarget:true,
+                    vtext:["Young star wrapped in ice","Its light passes through frozen CO₂ and CO in the disk and cloud around it."]};
   if(n===4) return {name:"The dot from Level 1", status:"candidate", catalog:null, motion:{arcsec_per_yr:null}, variability:{ratio:1},
                     molecules:{water:.12,methane:.02,co2:.82,co:.14}, spectrum:makeSpectrum({teff:5800, mol:{water:.12,methane:0,co2:.82,co:.14}}, 4404), isTarget:true};
   if(which==="target") return {name:"Known asteroid (training example)", status:"known", catalog:"Minor Planet Center · training example", training:true,
@@ -886,7 +900,8 @@ function trainingObj(n, which){
           spectrum:makeSpectrum({teff:850, mol:{water:.34,methane:.46,co2:.06,co:.15}}, 5502), isTarget:true};
 }
 
-function startTraining(n){
+async function startTraining(n){
+  await TRAINING_READY;
   leavePlay(); const L=LEVELS[n-1];
   S.ctx="training"; S.level=n; S.tr={checked:{}, marked:false, reported:false, lens:false, hintStage:0};
   show("play"); resetViewerState();
@@ -900,7 +915,7 @@ function startTraining(n){
   S.det=4; S.field=buildTraining(n); computeFrames();
   const real=TRAINING_DATA[n];
   if(real?.frames){ const id=S.scanId; Promise.all(real.frames.map(loadImg)).then(imgs=>{ if(S.scanId!==id) return;
-    S.apiFrames={frames:imgs.map((img,i)=>({img, label:S.field.epochs[i]}))}; draw(); }).catch(()=>toast("Frames missing","Running this level on the simulation.")); }
+    S.apiFrames={frames:imgs.map((img,i)=>({img, label:S.field.epochs[i]})), pixel_arcsec:real.pixel_arcsec, training:true}; draw(); }).catch(()=>toast("Frames missing","Running this level on the simulation.")); }
   $("simNote").hidden=false; $("simNote").textContent=S.field.sim;
   S.speed = n===3 ? 900 : 700;
   if(n===4){ S.selected="target"; S.lastObj=trainingObj(4); renderSpectrum(S.lastObj); }
@@ -938,11 +953,11 @@ function onTrainingHit(hit){
   }
   if(n===3){
     if(hit.kind==="target") return winLevel();
-    return say(hit.kind==="star" ? "This one didn't move between 2010 and 2025: it's a distant star." : "Nothing there. Tap right on a dot.");
+    return say(hit.kind==="star" ? "This one didn't move between 2010 and 2024: it's a distant star." : "Nothing there. Tap right on a dot.");
   }
   if(n===4){
     if(hit.kind==="target") return say(t.lens ? "Yes, that's our dot. Now answer the question above." : "Yes, that's the dot from Level 1. Now switch the lenses below.", true);
-    return say("That one's a star. Our dot is the fuzzy one that moves.");
+    return say(TRAINING_DATA[4] ? "That one's a background star. Our young star is the one in the middle." : "That one's a star. Our dot is the fuzzy one that moves.");
   }
   if(n===5){
     if(hit.kind==="target" || hit.kind==="candidate"){
@@ -961,6 +976,7 @@ function checkL5(){ const t=S.tr; if(t.checked.target && t.checked.extra && t.ma
 function onTrainingLens(l){
   if(S.level!==4 || S.tr.finished) return;
   if(l==="none") return;
+  if(l==="co" && TRAINING_DATA[4]){ say("A little CO ice too. But another lens lights it up even more. Try it."); return; }
   if(l!=="co2"){ say(`No big change in the ${MOLS[l].label} lens. Try another one.`); return; }
   S.tr.lens=true;
   say("Look at that cloud! Something around the dot eats light at 4.3 µm.", true);
@@ -1429,7 +1445,7 @@ bindSeg("zoomSeg","z", z=>{ S.zoom=+z; if(S.field) draw(); track("zoom",{val:+z}
 // Per-pixel molecule maps of the field (real data): fetched once per field, on the first lens switch.
 async function ensureLens(){
   const f=S.field;
-  if(!S.apiFrames || !f || S.lensMaps?.field===f || S.lensLoading===f) return;
+  if(!S.apiFrames || S.apiFrames.training || !f || S.lensMaps?.field===f || S.lensLoading===f) return;
   S.lensLoading=f; draw();
   try{
     const d=await api.lens(f), imgs={};
@@ -1445,7 +1461,7 @@ async function ensureLens(){
 // Ask the server to colour a clicked object by its spectrum. The paint is kept for the field,
 // so it stays when the user clicks something else.
 async function lensPaint(f, o){
-  if(!S.apiFrames || !f || !o) return;
+  if(!S.apiFrames || S.apiFrames.training || !f || !o) return;
   if(S.lensMaps?.field!==f){ (S.lensPending=S.lensPending||[]).push({f, ra:o.ra, dec:o.dec}); return; }
   try{
     const d=await api.lens(f, o), imgs={};
