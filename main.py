@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import threading
 import warnings
 from collections import OrderedDict
@@ -339,37 +340,78 @@ def _lens_png(depth: np.ndarray, rgb) -> str:
     return _png_uri(img)
 
 
+def _lens_payload(sky: dict, maps: dict) -> dict:
+    return _clean({
+        "size_px": int(sky["shape"][0]),
+        "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in maps.items()},
+        "peak": {k: round(float(np.nanmax(v)), 3) if np.isfinite(v).any() else 0.0 for k, v in maps.items()},
+        "lit": {k: int(np.sum(np.nan_to_num(v) >= 0.2)) for k, v in maps.items()},
+    })
+
+
+_LENS_LOCK = threading.Lock()
+
+
+def _paint_from_spectrum(sky: dict, maps: dict, coord: SkyCoord) -> dict:
+    """Пятно объекта у coord по индексам его спектра (те же числа, что в карточке /api/object).
+
+    Для объектов, слишком тусклых для попиксельной карты; измеренные пиксели не перекрываются.
+    """
+    from lens import paint_object
+    c = _snap(sky, coord)
+    scores = _analysis(sky, c)["scores"] or {}
+    if not any(v > 0 for v in scores.values()):
+        return maps
+    x, y = (float(v) for v in sky["wcs"].world_to_pixel(c))
+    ny, nx = sky["shape"]
+    if not (0 <= x < nx and 0 <= y < ny):
+        return maps
+    return paint_object(maps, x, y, scores)
+
+
 @app.get("/api/lens")
-def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5)):
+def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
+         ora: float | None = None, odec: float | None = None):
     """Карты молекул поля: где на картинке поглощение воды, метана, CO₂, CO сильнее, чем у соседей.
 
     Та же сетка и ориентация, что у кадров /api/frames с теми же ra, dec, fov.
     maps — PNG с прозрачностью для наложения; peak — самая глубокая полоса в поле (0..1);
     lit — сколько пикселей заметно светится.
+    ora, odec — объект, по которому кликнули: его пятно закрашивается по его спектру, если по пикселям
+    он слишком тусклый. Закраска запоминается для поля, так что следующие ответы её уже содержат.
     """
-    from lens import molecule_maps, paint_object
+    from lens import molecule_maps
     try:
         sky = _load_sky(ra, dec, fov)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
-    if "_lens" not in sky:   # считается один раз на поле и живёт вместе с ним в кэше _SKIES
+    if "_lens_raw" not in sky:   # считается один раз на поле и живёт вместе с ним в кэше _SKIES
         maps = molecule_maps(sky)
         # объект в центре поля: если он слишком тусклый для попиксельной карты (WISE 0855),
         # его пятно закрашивается по индексам его спектра — тем же, что в карточке /api/object
         try:
-            c = _snap(sky, sky["coord"])
-            scores = _analysis(sky, c)["scores"] or {}
-            if any(v > 0 for v in scores.values()):
-                x, y = (float(v) for v in sky["wcs"].world_to_pixel(c))
-                maps = paint_object(maps, x, y, scores)
+            maps = _paint_from_spectrum(sky, maps, sky["coord"])
         except Exception:
             pass
-        sky["_lens"] = _clean({
-            "size_px": int(sky["shape"][0]),
-            "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in maps.items()},
-            "peak": {k: round(float(np.nanmax(v)), 3) if np.isfinite(v).any() else 0.0 for k, v in maps.items()},
-            "lit": {k: int(np.sum(np.nan_to_num(v) >= 0.2)) for k, v in maps.items()},
-        })
+        with _LENS_LOCK:
+            if "_lens_raw" not in sky:
+                sky["_lens_raw"], sky["_lens_painted"] = maps, set()
+                sky["_lens"] = _lens_payload(sky, maps)
+    if ora is not None and odec is not None:
+        key = (round(ora, 5), round(odec, 5))
+        if key not in sky["_lens_painted"]:
+            try:
+                painted = _paint_from_spectrum(sky, sky["_lens_raw"], SkyCoord(ora, odec, unit="deg"))
+            except Exception:
+                painted = None
+            with _LENS_LOCK:
+                sky["_lens_painted"].add(key)
+                if painted is not None and painted is not sky["_lens_raw"]:
+                    # поверх текущей карты: другой клик мог успеть закрасить своё пятно
+                    cur = sky["_lens_raw"]
+                    merged = {k: np.where(np.isfinite(cur[k]), cur[k], painted[k]) for k in cur}
+                    sky["_lens_raw"] = merged
+                    sky["_lens"] = _lens_payload(sky, merged)
     return sky["_lens"]
 
 
@@ -427,6 +469,19 @@ def _snap(sky: dict, coord: SkyCoord, radius_px: int = 2) -> SkyCoord:
     return sky["wcs"].pixel_to_world(*c) if c is not None else coord
 
 
+_OBJECTS: "OrderedDict[tuple, dict]" = OrderedDict()   # готовые карточки: (поле, x, y) -> ответ
+_SAME_OBJECT_PX = 1.5   # клики рядом притягиваются к центру чуть по-разному; ближе 1.5 пкс (9″) SPHEREx не разделяет
+
+
+def _cached_object(sky: dict, x: float, y: float):
+    with _LOCK:
+        for k, v in reversed(_OBJECTS.items()):
+            if k[0] == id(sky) and (k[1] - x) ** 2 + (k[2] - y) ** 2 <= _SAME_OBJECT_PX ** 2:
+                _OBJECTS.move_to_end(k)
+                return v
+    return None
+
+
 @app.get("/api/object")
 def obj(ra: float, dec: float):
     coord = SkyCoord(ra, dec, unit="deg")
@@ -438,6 +493,11 @@ def obj(ra: float, dec: float):
             raise HTTPException(503, str(e))
 
     coord = _snap(sky, coord)                         # клик -> центр ближайшего источника
+    ox, oy = (float(v) for v in sky["wcs"].world_to_pixel(coord))
+    okey = (id(sky), round(ox, 2), round(oy, 2))
+    hit = _cached_object(sky, ox, oy)                 # повторный клик / прогретый объект: без SIMBAD
+    if hit is not None:
+        return hit
     a = _analysis(sky, coord, online=False)          # движение, спектр (быстро, без сети)
     card, m, v = a["card"], a["motion"], a["variability"]
     if not card["catalog_found"]:
@@ -470,7 +530,7 @@ def obj(ra: float, dec: float):
             catalog = " · ".join(p for p in parts if p)
 
     spd = card["speed_arcsec_yr"]
-    return _clean({
+    out = _clean({
         "name": (TARGET_NAMES_EN.get(card["name"], card["name"])) if found else None,
         "status": status,
         "catalog": catalog,
@@ -487,3 +547,44 @@ def obj(ra: float, dec: float):
         "verdict": card["verdict"],
         "simbad_url": card["simbad_url"],
     })
+    with _LOCK:
+        _OBJECTS[okey] = out
+        while len(_OBJECTS) > 256:
+            _OBJECTS.popitem(last=False)
+    return out
+
+
+# ---------- прогрев после запуска ----------
+# Демо-объекты сайта (TARGETS и PATCHES в web/index.html): поле 0.1°, детектор 4, кадры раз в полгода —
+# ровно то, что запрашивает сайт. Без прогрева первое открытие объекта после деплоя ждёт 10–17 с
+# (кадры из кэша на диске, анализ, Gaia, карты молекул). SKYWATCH_WARM=0 — не прогревать.
+WARM_FIELDS = [
+    ("Barnard's Star", 269.4463, 4.76783),
+    ("WISE 0855-0714", 133.75977, -7.24218),
+    ("Epsilon Indi B", 331.09639, -56.80057),
+    ("RW Aurigae", 76.95609, 30.40113),
+    ("R Draconis", 248.16723, 66.75502),
+    ("Near Luhman 16", 162.328, -53.319),
+]
+
+
+def _warm() -> None:
+    import time
+    t_all = time.time()
+    print(f"[warm] preloading {len(WARM_FIELDS)} demo fields in the background", flush=True)
+    for name, ra, dec in WARM_FIELDS:
+        t = time.time()
+        try:
+            frames(ra, dec, fov=0.1, detector=4, mode="blink", cadence="pass")
+            obj(ra, dec)                                    # карточка центрального объекта (+ Gaia)
+            lens(ra, dec, fov=0.1, ora=None, odec=None)     # карты молекул
+            print(f"[warm] {name}: {time.time() - t:.1f} s", flush=True)
+        except Exception as e:                              # нет кэша и архив недоступен — не страшно
+            print(f"[warm] {name}: skipped ({e})", flush=True)
+    print(f"[warm] done in {time.time() - t_all:.0f} s", flush=True)
+
+
+@app.on_event("startup")
+def _start_warm() -> None:
+    if os.environ.get("SKYWATCH_WARM", "1") != "0":
+        threading.Thread(target=_warm, name="warm", daemon=True).start()

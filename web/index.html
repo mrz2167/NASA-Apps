@@ -116,6 +116,14 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .checklist li i{flex:0 0 14px;height:14px;border-radius:50%;border:1px solid rgba(243,238,228,.35)}
 .checklist li.ok{color:var(--paper)}
 .checklist li.ok i{background:var(--amber);border-color:var(--amber);box-shadow:0 0 8px rgba(246,181,68,.7)}
+/* level won: shown in the task box, the viewer stays visible below */
+.win{margin-top:16px;display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;justify-content:space-between;padding:16px 18px;border:1px solid rgba(246,181,68,.45);border-radius:var(--radius);background:rgba(246,181,68,.08);animation:in .45s ease}
+.win-text{flex:1 1 320px;display:flex;flex-direction:column;gap:4px}
+.win-text .label{color:var(--amber)}
+.win-t{font-family:Unbounded,sans-serif;font-weight:400;font-size:18px}
+.win-x{font-size:13px;color:var(--muted)}
+.win-btn{flex:0 0 auto;animation:winGlow 1.8s ease-in-out infinite}
+@keyframes winGlow{0%,100%{box-shadow:0 0 0 0 rgba(246,181,68,.0)}50%{box-shadow:0 0 22px 2px rgba(246,181,68,.55)}}
 
 /* free exploration head */
 .banner{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:10px 16px;border:1px solid rgba(246,181,68,.35);border-radius:999px;font-size:13px;background:rgba(246,181,68,.06)}
@@ -158,6 +166,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .plate.is-new{border-color:var(--amber);box-shadow:0 0 0 1px rgba(246,181,68,.35),0 0 30px -8px rgba(246,181,68,.6)}
 .plate .new{display:none;position:absolute;top:-9px;left:10px;font-size:9px;font-weight:700;letter-spacing:.18em;padding:2px 7px;border-radius:999px;background:var(--amber);color:var(--night)}
 .plate.is-new .new{display:block}
+.wise-btn{padding:7px 14px;font-size:12px;text-decoration:none}
 .plate .tip{flex-basis:100%;font-size:12px;color:var(--amber);order:-1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
 .seg button{border:0;background:transparent;color:var(--muted);padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600}
@@ -394,6 +403,11 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <div class="seg" id="detSeg"></div>
             <span class="det-hint" id="detHint"></span>
           </div>
+          <div class="plate" data-tool="wise">
+            <span class="label ctl-label">Older sky</span>
+            <a class="btn btn-ghost wise-btn" id="wiseLink" href="http://byw.tools/wiseview" target="_blank" rel="noopener">Open in WiseView ↗</a>
+            <span class="det-hint">WISE 2010–2024: 14 more years of motion</span>
+          </div>
         </div>
         <div class="simnote" id="simNote" hidden></div>
       </section>
@@ -522,7 +536,7 @@ const TARGETS = {
 
 /* ---------- the 10 levels ---------- */
 const TOOL_ORDER = ["play","mode","epoch","lens","who"];
-const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det"];
+const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det","wise"];
 
 const LEVELS = [
   {n:1, title:"The Power of the Blink",
@@ -897,6 +911,30 @@ function completeLevel(n){
   renderProgress();
   const after=rankFor(xpTotal()).name;
   if(first && after!==before) setTimeout(()=>toast("Promotion", `You're now ${/^[AEIOU]/i.test(after)?"an":"a"} ${after}.`), 1600);
+  showWin(n, first);
+}
+
+// The level is won: say so in the task box above the viewer, and leave the viewer on screen so the
+// player sees what they just did. The star celebration opens only when they ask for it.
+function showWin(n, first){
+  const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
+  const kicker = (n<=5 ? `Training ${n} of 5` : `Case ${n-5} of 5`) + " complete" + (first ? ` · +${XP_FOR(n)} XP` : "");
+  say("");
+  $("hintBtn").hidden=true; $("hintRow").hidden=true;
+  const keep = S.ctx==="case" ? ($("taskExtra").querySelector(".checklist")?.outerHTML||"") : "";   // all steps ticked
+  $("taskExtra").innerHTML = keep + `<div class="win" role="status">
+      <div class="win-text"><span class="label">✓ ${kicker}</span><b class="win-t"></b><p class="win-x"></p></div>
+      <button class="btn btn-amber win-btn" id="winBtn">★ ${first ? "Collect your star" : "See your star"}</button>
+    </div>`;
+  $("taskExtra").querySelector(".win-t").textContent = L.t;
+  $("taskExtra").querySelector(".win-x").textContent = L.x;
+  $("winBtn").onclick = ()=>openFound(n, first);
+  if(S.field && !S.playing) play();   // keep the found object blinking under the card
+  const box=$("taskBox").getBoundingClientRect();
+  if(box.top<0 || box.bottom>innerHeight) $("taskBox").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function openFound(n, first){
   const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
   const animStar = first && n!==5;   // level 5: the “Training complete” screen lights the fifth point
   $("foundStarBox").hidden = n===5 && first;
@@ -1072,10 +1110,25 @@ const api = {
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}, 20000); },
-  lens(f){ return this.get("/api/lens",{ra:f.ra,dec:f.dec,fov:f.fov}); },
+  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },   // a new patch of sky can take ~a minute
+  lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
 };
+// WiseView (byw.tools, AMNH): the same spot in WISE/NEOWISE images, 2010–2024. Centred on the clicked
+// object if there is one, otherwise on the field; settings as WiseView's own defaults (W2, inverted).
+function wiseviewUrl(){
+  const f=S.field; if(!f) return "http://byw.tools/wiseview";
+  const o=S.track ? {ra:S.track.ra, dec:S.track.dec} : (S.selSky || {ra:f.ra, dec:f.dec});
+  const size = S.track || S.selSky ? 176 : Math.min(600, Math.round(f.fov*3600));
+  return "http://byw.tools/wiseview#ra="+o.ra.toFixed(6)+"&dec="+o.dec.toFixed(6)+"&size="+size+
+    "&band=2&speed=698.16&minbright=2.2488&maxbright=500.0000&window=1.06038&diff_window=1&linear=1&color=&zoom=7"+
+    "&border=0&gaia=0&invert=1&maxdyr=0&scandir=0&neowise=0&diff=0&outer_epochs=0&unique_window=1&smooth_scan=0"+
+    "&shift=0&pmra=0&pmdec=0&synth_a=0&synth_b=0";
+}
+$("wiseLink").addEventListener("click", e=>{
+  if(!S.field){ e.preventDefault(); return toast("No sky yet","Open a patch of sky first."); }
+  e.currentTarget.href=wiseviewUrl();
+});
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
 
 /* ---------- drawing ---------- */
@@ -1197,7 +1250,7 @@ function updateHud(){
 
 /* ---------- loading a field (cases & free) ---------- */
 async function scan(ra, dec, fov, key){
-  stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
+  stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.lensPending=[]; S.selSky=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
   $("emptyState").style.display="none"; $("loading").classList.add("on");
   try{
@@ -1248,6 +1301,20 @@ async function ensureLens(){
   }catch(e){ if(S.field===f) toast("Lens map unavailable", e.message); }
   if(S.lensLoading===f) S.lensLoading=null;
   if(S.field===f) draw();
+  // objects clicked before the map was ready
+  const pend=(S.lensPending||[]).filter(o=>o.f===f); S.lensPending=[];
+  for(const o of pend) await lensPaint(f, o);
+}
+// Ask the server to colour a clicked object by its spectrum. The paint is kept for the field,
+// so it stays when the user clicks something else.
+async function lensPaint(f, o){
+  if(!S.apiFrames || !f || !o) return;
+  if(S.lensMaps?.field!==f){ (S.lensPending=S.lensPending||[]).push({f, ra:o.ra, dec:o.dec}); return; }
+  try{
+    const d=await api.lens(f, o), imgs={};
+    for(const k in d.maps) imgs[k]=await loadImg(d.maps[k]);
+    if(S.field===f){ S.lensMaps={field:f, imgs, peak:d.peak, lit:d.lit}; draw(); }
+  }catch(e){ /* the object glow still shows its signs */ }
 }
 bindSeg("lensSeg","l", l=>{ S.lens=l; if(l!=="none") ensureLens(); if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
 $("detSeg").innerHTML = DETECTORS.map(d=>`<button data-d="${d.id}" class="${d.id===S.det?"on":""}">D${d.id}</button>`).join("");
@@ -1315,10 +1382,16 @@ canvas.addEventListener("click", async e=>{
     if(pick==="target") S.trackReq=(S.trackReq||0)+1;
     else followTrack(S.field.ra+dra, S.field.dec+ddec);
     draw();
+    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // for the WiseView link
     fileStatus("Checking…", "Looking up how it moves, how it flickers and what it's made of.", true);
+    // the first click on a new patch of sky reads every exposure there: say so instead of looking stuck
+    const slow=setTimeout(()=>{ if(click===S.clickId) fileStatus("Calculating spectrum…", "First look at this patch of sky: we're reading every SPHEREx exposure of it. This can take up to a minute.", true); }, 6000);
     try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }
     catch(err){ if(click===S.clickId){ fileStatus("No answer", "The archive didn't reply ("+esc(err.message)+"). Tap the dot again."); toast("Archive unreachable", "Tap the dot again."); } return; }
-  } else { draw(); obj=describe(S.field, pick); }
+    finally{ clearTimeout(slow); }
+    // colour the clicked object on the lens map by its own spectrum (it may be too faint for the per-pixel map)
+    if(pick!=="target" && Object.values(obj.molecules||{}).some(v=>v>0)) lensPaint(S.field, S.selSky);
+  } else { S.selSky=null; draw(); obj=describe(S.field, pick); }   // simulated stars have no real coordinates
   if(click!==S.clickId) return;
   S.lastObj=obj; renderFile(obj); renderSpectrum(obj); draw(); revealFile();
   if(obj.isTarget) track("selectTarget",{});

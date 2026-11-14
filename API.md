@@ -107,6 +107,10 @@ CO₂ or CO band more than for the neighbouring stars.
 
 **Query:** `ra`, `dec`, `fov` — same as `/api/frames`; the maps lie on the same grid and orientation.
 
+Optional `ora`, `odec`: an object the user clicked. If it is too faint for the per-pixel map, its disc (~2 px) is
+painted from its own spectrum indices (the same numbers as its `/api/object` card), only where the map is empty.
+The paint is kept for the field, so later responses include it.
+
 **Response:**
 
 ```json

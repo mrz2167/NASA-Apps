@@ -225,3 +225,5 @@ scratch/
 *.zip
 logs/
 test_pipeline.py
+out/.DS_Store
+.DS_Store
