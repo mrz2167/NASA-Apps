@@ -17,6 +17,7 @@ IRSA (TAP) — единственное место, где можно спрос
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import threading
@@ -29,13 +30,13 @@ import numpy as np
 import requests
 
 ROOT = Path(__file__).resolve().parent
-INDEX_DIR = ROOT / "cache" / "index"
+INDEX_DIR = Path(os.environ.get("SKYWATCH_CACHE") or ROOT / "cache") / "index"
 PARTS = INDEX_DIR / "parts"
 MERGED = INDEX_DIR / "spherex_index.npz"
 BUCKET = "https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com/"
 IRSA_IBE = "https://irsa.ipac.caltech.edu/ibe/data/spherex/"
 NPIX = 2040
-EDGE_PX = 45
+EDGE_PX = 15                       # 97% снимков из ответа IRSA; при 45 было 93.5%, при 0 появляются лишние
 RANGE = (11520, 23039)             # здесь лежат PC/CRVAL/MJD-BEG заголовка IMAGE (проверено на D1–D6)
 RANGE_WIDE = (0, 31679)
 NAME = re.compile(r"level2_(\d{4}W\d{2}_\d[A-Z])_(\d+)_(\d+)D(\d)_spx_(.+)\.fits$")

@@ -34,7 +34,7 @@ logging.getLogger("astropy").setLevel(logging.ERROR)  # шум про SIP у с�
 IRSA = "https://irsa.ipac.caltech.edu/"
 # Откуда брать пиксели: "aws" (по умолчанию: бакет nasa-irsa-spherex, IRSA как запасной) или "irsa".
 SOURCE = os.environ.get("SKYWATCH_SOURCE", "aws").lower()
-CACHE = Path(__file__).resolve().parent / "cache"
+CACHE = Path(os.environ.get("SKYWATCH_CACHE") or Path(__file__).resolve().parent / "cache")   # SKYWATCH_CACHE: общий кэш для копий репозитория
 # Предпочтение при дублях одной экспозиции в разных релизах.
 RELEASE_PRIORITY = {"dr1": 0, "qr3": 1, "qr2": 2}
 
