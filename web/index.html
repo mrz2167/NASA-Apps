@@ -518,8 +518,18 @@ function buildField(ra, dec, fov, key){
   return {N, seed, stars, target, ra, dec, fov};
 }
 const nE = () => S.apiFrames ? S.apiFrames.frames.length : EPOCHS.length;
-function targetPos(field, e){
-  const t=field.target;
+// The object whose path Trail and the lenses follow: the one the user clicked, else the field's target.
+// While the clicked object's path is loading (or if it failed), stay on the click — never jump to the centre.
+function pathOf(field){
+  if(S.track) return S.track;
+  if(S.selected!=null && S.selected!=="target"){
+    const p = typeof S.selected==="object" ? S.selected : field.stars[S.selected];
+    if(p) return {positions:[{x:p.x, y:p.y}], pending:true};
+  }
+  return field.target;
+}
+function targetPos(field, e, t){
+  t = t || pathOf(field);
   if(t.positions) return t.positions[Math.min(e, t.positions.length-1)];
   const k=e-(EPOCHS.length-1)/2;
   return {x:t.x0+t.motion[0]*k, y:t.y0-t.motion[1]*k};
@@ -574,7 +584,8 @@ function describe(field, which){
 const api = {
   async get(path, params){ const u=new URL(CONFIG.API_BASE+path); for(const k in params) u.searchParams.set(k, params[k]); const r=await fetch(u); if(!r.ok) throw new Error(r.status); return r.json(); },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}); }
+  object(ra,dec){ return this.get("/api/object",{ra,dec}); },
+  track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det}); }
 };
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
 
@@ -615,9 +626,11 @@ async function draw(){
 function drawOverlays(){
   const f=S.field, W=canvas.width, px=W/view().sw;
   // lens glow on the target (object-level lens: driven by its spectrum, not by pixels)
-  if(f.target && S.lens!=="none"){
+  const tt=pathOf(f);
+  if(tt && S.lens!=="none"){
     const tp=targetPos(f,S.epoch), p=toCanvas(tp.x,tp.y);
-    const sc=f.target.mol[S.lens]||0, col=MOLS[S.lens].color;
+    const mol = tt===f.target ? (tt.mol||{}) : (S.lastObj?.molecules||{});
+    const sc=mol[S.lens]||0, col=MOLS[S.lens].color;
     ctx.save();
     if(sc>=SIGN){
       const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,px*4.5);
@@ -627,11 +640,12 @@ function drawOverlays(){
       label(`${MOLS[S.lens].sym} SIGN ${sc.toFixed(2)}`, p.x+px*3, p.y-px*3, col);
     } else {
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
-      label(`NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
+      const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
+      label(checking ? `${MOLS[S.lens].sym} · checking…` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
     }
     ctx.restore();
   }
-  if(f.target && S.mode==="trail"){
+  if(tt && S.mode==="trail"){
     const pts=Array.from({length:nE()},(_,e)=>{ const q=targetPos(f,e); return toCanvas(q.x,q.y); });
     ctx.save(); ctx.strokeStyle="#E0352B"; ctx.lineWidth=2; ctx.shadowColor="#F07A3A"; ctx.shadowBlur=8;
     ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
@@ -641,7 +655,7 @@ function drawOverlays(){
     ctx.restore();
   }
   if(S.selected!=null){
-    const pos = S.selected==="target" ? targetPos(f,S.epoch) : (typeof S.selected==="object" ? S.selected : f.stars[S.selected]);
+    const pos = (S.selected==="target" || S.track) ? targetPos(f,S.epoch) : (typeof S.selected==="object" ? S.selected : f.stars[S.selected]);
     const p=toCanvas(pos.x,pos.y), r=Math.max(12,px*2.2);
     ctx.save(); ctx.strokeStyle="#F6B544"; ctx.lineWidth=2;
     for(const [sx,sy] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ ctx.beginPath(); ctx.moveTo(p.x+sx*r,p.y+sy*r*.45); ctx.lineTo(p.x+sx*r,p.y+sy*r); ctx.lineTo(p.x+sx*r*.45,p.y+sy*r); ctx.stroke(); }
@@ -661,7 +675,7 @@ function updateHud(){
 
 /* ---------- loading a field ---------- */
 async function scan(ra, dec, fov, key){
-  stop(); S.selected=null; resetFile(); clearSpectrum();
+  stop(); S.selected=null; S.track=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   $("emptyState").style.display="none"; $("loading").classList.add("on");
   $("coordLabel").textContent=`RA ${ra.toFixed(4)}° · Dec ${dec.toFixed(4)}° · ${fov}°`;
   try{
@@ -706,9 +720,20 @@ bindSeg("detSeg","d", async d=>{
   S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range;
   P.dets[d]=1; save(); track("detector",{val:+d}); if(Object.keys(P.dets).length>=6 && !P.ach.eyes) unlock("eyes");
   if(!S.field) return;
-  if(CONFIG.API_BASE){ $("loading").classList.add("on"); try{ await loadApiFrames(); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
+  if(CONFIG.API_BASE){ $("loading").classList.add("on"); try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
   draw();
 });
+
+// Ask the server where the clicked object sits on each frame of the current detector.
+async function followTrack(ra, dec){
+  const req = S.trackReq = (S.trackReq||0)+1;
+  try{
+    const t = await api.track(ra, dec, S.field, S.det);
+    if(req!==S.trackReq) return;              // a newer click or scan won
+    S.track = {positions:t.positions, ra:t.ra, dec:t.dec};
+    draw();
+  }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
+}
 
 /* ---------- selecting objects ---------- */
 canvas.addEventListener("click", async e=>{
@@ -717,17 +742,23 @@ canvas.addEventListener("click", async e=>{
   const gx=v.sx+(e.clientX-rect.left)/rect.width*v.sw, gy=v.sy+(e.clientY-rect.top)/rect.height*v.sw;
   const tol=Math.max(2.2, 2.6/S.zoom*1.5);
   let pick=null, best=1e9;
-  if(S.field.target){ const p=targetPos(S.field,S.epoch); const d=Math.hypot(p.x-gx,p.y-gy); if(d<tol*1.3){ pick="target"; best=d; } }
+  if(S.field.target){ const p=targetPos(S.field,S.epoch,S.field.target); const d=Math.hypot(p.x-gx,p.y-gy); if(d<tol*1.3){ pick="target"; best=d; } }
   if(pick==null) S.field.stars.forEach((s,i)=>{ const d=Math.hypot(s.x-gx,s.y-gy); if(d<tol && d<best && s.f*s.det[S.det-1]>.18){ best=d; pick=i; } });
   if(pick==null && !CONFIG.API_BASE) return toast("Empty sky","Nothing bright enough there. Click right on a dot.");
   if(pick==null) pick={x:gx, y:gy}; // real data: ask the server about any clicked position
-  S.selected=pick; draw();
+  S.selected=pick; S.lastObj=null;
+  const click = S.clickId = (S.clickId||0)+1;   // answers for an older click are ignored
   let obj;
   if(CONFIG.API_BASE){
     const N=S.field.N, ddec=(N/2-gy)*CONFIG.PIX_ARCSEC/3600, dra=-(gx-N/2)*CONFIG.PIX_ARCSEC/3600/Math.cos(S.field.dec*Math.PI/180);
-    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }catch(err){ return toast("Archive unreachable", err.message); }
+    // Trail and lenses follow the clicked object; clicking the field's own target goes back to it.
+    if(pick==="target"){ S.track=null; S.trackReq=(S.trackReq||0)+1; }
+    else { S.track=null; followTrack(S.field.ra+dra, S.field.dec+ddec); }
+    draw();
+    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }catch(err){ if(click===S.clickId) toast("Archive unreachable", err.message); return; }
   } else obj=describe(S.field, pick);
-  S.lastObj=obj; renderFile(obj); renderSpectrum(obj);
+  if(click!==S.clickId) return;
+  S.lastObj=obj; renderFile(obj); renderSpectrum(obj); draw();
   if(obj.isTarget) track("selectTarget",{});
   if(obj.status==="candidate") track("selectCandidate",{});
 });
