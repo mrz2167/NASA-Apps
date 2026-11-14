@@ -1,6 +1,7 @@
-"""Реальные кадры для учебных уровней 1–4 -> web/levels/ (PNG + training.json).
+"""Реальные кадры для учебных уровней 1–5 -> web/levels/ (PNG + training.json).
 
     python make_training.py [--api http://localhost:8077]
+    python make_training.py --only5        # только уровень 5: файлы уровней 1–4 не трогаются
 
 Уровень 1  WISE 0855 (самый холодный коричневый карлик): два кадра WISE, 2010 и 2024 — прыжок ~41 пикселя.
 Уровень 2  Epsilon Indi B: четыре кадра WISE 2010–2024 + один «космический луч», нарисованный нарочно
@@ -8,7 +9,9 @@
 Уровень 3  Luhman 16: четыре кадра WISE 2010–2024, 2.79″ в год.
 Уровень 4  CRBR 2422.8-3423 (протозвезда во льду): кадры SPHEREx D5 и спектр из /api/object —
            линзы CO₂ и CO загораются по настоящим числам.
-Уровень 5 остаётся симуляцией: настоящего «неизвестного кандидата» у нас нет.
+Уровень 5  Gliese 570 D (коричневый карлик T-типа, 19 св. лет): пять кадров WISE 2010–2024, без подсказок.
+           Объект известный (Burgasser et al. 2000) — ученик находит его сам и сверяет с каталогом.
+           Скорость меряется по всем эпохам WISE и кладётся в training.json рядом с каталожной (SIMBAD).
 
 Кадры WISE берутся из wise.py (кэш cache/wise/), SPHEREx — с работающего сервера (--api).
 Положения объектов — в пикселях кадра (x вправо, y вниз, 0 — левый верхний угол), как ждёт сайт.
@@ -24,7 +27,9 @@ from pathlib import Path
 
 import numpy as np
 import requests
+import astropy.units as u
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
 from PIL import Image
 
 from targets import coord_at
@@ -67,10 +72,34 @@ def stars_in(img, avoid, n=30, keep_off=4.0):
     return out
 
 
-def wise_level(n, w, path, idx, N, labels, sim, glitch=None):
-    """Кадры idx, вырезанные квадратом N вокруг середины пути объекта."""
+def stars_stack(imgs, avoid, keep_off=4.0, nsig=4.0):
+    """Неподвижные точки по среднему из всех кадров уровня: по одной на пятно.
+
+    Среднее гасит шум, поэтому находятся и слабые звёзды (на них тоже нажимают), а пересвеченная звезда
+    даёт одну точку — середину пятна, а не по точке на каждый белый пиксель. Вытянутые пятна (блик от
+    яркой звезды за краем кадра) звёздами не считаются.
+    """
+    from scipy.ndimage import find_objects, gaussian_filter, label
+    a = gaussian_filter(np.mean([i.astype(float) for i in imgs], axis=0), 0.7)
+    med = np.median(a); sig = 1.4826 * np.median(np.abs(a - med)) or 1.0
+    lab, n = label(a - med > nsig * sig)
+    out = []
+    for k, sl in enumerate(find_objects(lab), 1):
+        yy, xx = np.nonzero(lab == k)
+        h, wd = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
+        if len(yy) < 3 or len(yy) > 60 or max(h, wd) > 2.2 * min(h, wd) + 1 or len(yy) < 0.45 * h * wd:
+            continue
+        wt = a[yy, xx] - med
+        x, y = float((xx * wt).sum() / wt.sum()) + 0.5, float((yy * wt).sum() / wt.sum()) + 0.5
+        if all(math.hypot(x - p["x"], y - p["y"]) > keep_off for p in avoid):
+            out.append({"x": round(x, 2), "y": round(y, 2)})
+    return out
+
+
+def wise_level(n, w, path, idx, N, labels, sim, glitch=None, shift=(0, 0)):
+    """Кадры idx, вырезанные квадратом N вокруг середины пути объекта (shift — сдвиг выреза в пикселях)."""
     pts = [path[i] for i in idx]
-    cx = np.mean([p[0] for p in pts]); cy = np.mean([p[1] for p in pts])
+    cx = np.mean([p[0] for p in pts]) + shift[0]; cy = np.mean([p[1] for p in pts]) + shift[1]
     ny, nx = w["shape"]
     c0 = int(round(min(max(cx - N / 2, 0), nx - N))); r0 = int(round(min(max(cy - N / 2, 0), ny - N)))
     positions = [{"x": round(p[0] - c0 + 0.5, 2), "y": round(p[1] - r0 + 0.5, 2)} for p in pts]
@@ -100,16 +129,79 @@ def wise_level(n, w, path, idx, N, labels, sim, glitch=None):
         name = f"l{n}_{k}.png"
         Image.fromarray(img).save(OUT / name, optimize=True)
         files.append("levels/" + name)
-    stars = stars_in(imgs[-1], positions)
+    stars = stars_stack(imgs, positions) if n == 5 else stars_in(imgs[-1], positions)
     return {"N": N, "pixel_arcsec": w["pixel_arcsec"], "epochs": labels, "frames": files,
-            "target": {"positions": positions}, "stars": stars, "extras": extras, "sim": sim}
+            "target": {"positions": positions}, "stars": stars, "extras": extras, "sim": sim,
+            "origin": [c0, r0]}
+
+
+# Gliese 570 D по SIMBAD (GJ 570 D): положение J2000, собственное движение (mas/год), параллакс (mas)
+GL570D = dict(ra=224.312344, dec=-21.363264, pmra=1038.08, pmdec=-1677.69, plx=169.3)
+
+
+def level5():
+    """Уровень 5: Gliese 570 D среди звёзд фона, пять февральских кадров WISE 2010–2024.
+
+    Каталог нужен только чтобы навести вырезку и найти пятно на последнем кадре; дальше путь ведёт
+    wise.track по самим кадрам, и скорость — прямая по центрам пятна во всех эпохах.
+    """
+    g = GL570D
+    c = SkyCoord(g["ra"] * u.deg, g["dec"] * u.deg, pm_ra_cosdec=g["pmra"] * u.mas / u.yr,
+                 pm_dec=g["pmdec"] * u.mas / u.yr, distance=(1000 / g["plx"]) * u.pc, obstime=Time("J2000"))
+    mid = c.apply_space_motion(new_obstime=Time("2017-06-01"))
+    w = get_wise(round(float(mid.ra.deg), 5), round(float(mid.dec.deg), 5), 0.1)
+    fr = w["frames"]
+    x1, y1 = wise_px(w, c.apply_space_motion(new_obstime=Time(fr[-1]["date"])))
+    path = track(fr, x1, y1, start=len(fr) - 1)
+
+    t = np.array([f["mjd"] for f in fr]) / 365.25
+    (vx, _), cvx = np.polyfit(t, [p[0] for p in path], 1, cov=True)
+    (vy, _), cvy = np.polyfit(t, [p[1] for p in path], 1, cov=True)
+    k = w["pixel_arcsec"]
+    v_e, v_n = -vx * k, -vy * k                       # x растёт к западу, y — вниз (к югу)
+    speed = math.hypot(v_e, v_n)
+    err = math.sqrt((v_e ** 2 * cvx[0, 0] + v_n ** 2 * cvy[0, 0])) * k / speed
+    pa = math.degrees(math.atan2(v_e, v_n)) % 360
+    cat = math.hypot(g["pmra"], g["pmdec"]) / 1000
+    cat_pa = math.degrees(math.atan2(g["pmra"], g["pmdec"])) % 360
+    span = math.hypot(path[-1][0] - path[0][0], path[-1][1] - path[0][1])
+    print(f"Gliese 570 D: measured {speed:.3f} ± {err:.3f}\"/yr at PA {pa:.0f}° over {len(fr)} WISE epochs "
+          f"{fr[0]['date']}..{fr[-1]['date']} ({span:.1f} px); catalogue (SIMBAD) {cat:.3f}\"/yr at PA {cat_pa:.0f}°")
+
+    idx = pick(fr, [2010.12, 2014.12, 2017.12, 2021.12, 2024.12])     # все — февральские проходы
+    N = 56
+    d = wise_level(5, w, path, idx, N, [fr[i]["date"][:4] for i in idx],
+                   "Real WISE/NEOWISE frames · 2010–2024 · the pale streak is glare from a bright star outside the frame",
+                   shift=(-7, 2))
+    c0, r0 = d.pop("origin")
+    sky = w["wcs"].pixel_to_world(c0 + N / 2 - 0.5, w["shape"][0] - 2 - (r0 + N / 2 - 0.5))   # обратное к wise_px
+    d["obj"] = {"name": "Gliese 570 D", "catalog": "SIMBAD · GJ 570 D · T-type brown dwarf",
+                "ra": round(float(sky.ra.deg), 4), "dec": round(float(sky.dec.deg), 4),
+                "motion": {"arcsec_per_yr": round(speed, 2), "arcsec_per_yr_err": round(err, 2), "pa_deg": round(pa),
+                           "catalog_arcsec_per_yr": round(cat, 2), "significant": True},
+                "shift_px": round(math.hypot(path[idx[-1]][0] - path[idx[0]][0], path[idx[-1]][1] - path[idx[0]][1])),
+                "years": [fr[idx[0]]["date"][:4], fr[idx[-1]]["date"][:4]]}
+    return d
+
+
+def report(data):
+    for n, d in data.items():
+        p = d["target"]["positions"]
+        print(f"level {n}: N={d['N']} frames={len(d['frames'])} stars={len(d['stars'])} "
+              f"target {p[0]} -> {p[-1]}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--api", default="http://localhost:8099")
+    ap.add_argument("--only5", action="store_true", help="rebuild level 5 only; levels 1–4 stay as they are")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
+    if a.only5:
+        data = json.loads((OUT / "training.json").read_text(encoding="utf-8"))
+        data["5"] = level5()
+        (OUT / "training.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        return report(data)
     data = {}
 
     # 1. WISE 0855: 2010 и 2024
@@ -161,11 +253,12 @@ def main():
                "sim": "Real NASA SPHEREx frames · detector 5 · the young star CRBR 2422.8-3423"}
     print("CRBR molecules:", ob["molecules"], "spectrum points:", len(ob["spectrum"]["wavelength"]))
 
+    data[5] = level5()
+    for d in data.values():
+        d.pop("origin", None)
+
     (OUT / "training.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    for n, d in data.items():
-        p = d["target"]["positions"]
-        print(f"level {n}: N={d['N']} frames={len(d['frames'])} stars={len(d['stars'])} "
-              f"target {p[0]} -> {p[-1]}")
+    report(data)
 
 
 if __name__ == "__main__":
