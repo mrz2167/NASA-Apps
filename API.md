@@ -102,6 +102,20 @@ The frontend writes the verdict itself from these numbers (moving + methane → 
 
 ---
 
+## Where the data came from, and progress of a new field
+
+`/api/frames` `meta.search` says how the list of exposures was found when the field was built: `irsa`
+(NASA's IRSA archive), `aws-index` (our own index of NASA's AWS bucket; IRSA was not answering) or `saved`
+(a stored search or a saved field: no archive call). `meta.fresh` is true when this very request built the field.
+
+`GET /api/progress?ra&dec&fov&detector&cadence` (same values as the pending `/api/frames` call) never builds
+anything and answers at once: `{"active": false}` when nothing is being built for the field, otherwise
+`{"active": true, "stage", "done", "total", "elapsed_s"}` with `stage` one of `search`, `irsa`, `index`,
+`download` (cutouts fetched, `done`/`total`), `saved` (cutouts read from our disk, `done`/`total`), `build`.
+The site polls it once a second while a frames request is pending.
+
+---
+
 ## WISE/NEOWISE frames: `source=wise`
 
 `/api/frames?ra&dec&fov&source=wise` returns 20–23 frames of WISE/NEOWISE W2 (4.6 µm), one per six-month

@@ -170,7 +170,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .err-alt{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-width:100%}
 .err-alt .chip{color:var(--paper);max-width:100%;padding:6px 12px}
 @media (max-width:520px){.empty.alt{gap:6px}.empty.alt .display{font-size:17px}.empty.alt #errText{font-size:12px}.empty.alt .btn{padding:8px 16px}}
-.loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(7,10,32,.7);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
+.loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(7,10,32,.7);font-size:12px;letter-spacing:.2em;text-transform:uppercase;text-align:center;line-height:1.7;padding:0 22px}
 .loading.on{display:flex}
 .plates{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
 .plate{position:relative;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(243,238,228,.025)}
@@ -431,6 +431,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           </div>
         </div>
         <div class="simnote" id="simNote" hidden></div>
+        <div class="simnote" id="srcNote" hidden></div>
       </section>
 
       <aside id="side" style="display:grid;gap:20px;align-content:start">
@@ -845,7 +846,7 @@ function resetViewerState(){
   const seg=(id,attr,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on", b.dataset[attr]===String(val)));
   seg("modeSeg","m","blink"); seg("lensSeg","l","none"); seg("zoomSeg","z","1");
   S.scanId=(S.scanId||0)+1; S.apiFrames=null; $("loading").classList.remove("on"); $("errState").style.display="none";
-  say(""); $("taskExtra").innerHTML=""; $("simNote").hidden=true; $("hintRow").hidden=true; $("hintText").textContent="";
+  say(""); $("taskExtra").innerHTML=""; $("simNote").hidden=true; $("srcNote").hidden=true; $("hintRow").hidden=true; $("hintText").textContent="";
   $("hintBtn").textContent="Need a hint?"; $("hintBtn").hidden=false;
   resetFile(); clearSpectrum();
 }
@@ -1399,6 +1400,44 @@ function updateHud(){
   const pxCanvas = canvas.getBoundingClientRect().width / view().sw; const arcsec=30;
   $("scaleI").style.width = Math.max(8, pxCanvas*arcsec/pixArc())+"px"; $("scaleT").textContent=arcsec+"″";
   $("epochIn").value=S.epoch;
+  srcNote();
+}
+// Free mode, SPHEREx: which of the three routes gave the list of exposures for this field (meta.search from the server).
+function srcNote(){
+  const m=S.apiFrames?.meta, s=m?.search, kept=" · saved on our server";
+  const t = S.ctx!=="free" || !S.field?.live || !m || m.source==="wise" || !s ? ""
+    : s==="irsa" ? "NASA IRSA archive"+(m.fresh?"":kept)
+    : s==="aws-index" ? "our own index + NASA's AWS bucket"+(m.fresh?" (IRSA is not answering)":kept)
+    : "saved on our server";
+  $("srcNote").hidden=!t; if(t) $("srcNote").textContent="Source: "+t;
+}
+// While a frames request is pending, ask the server once a second what it is doing for this field and say it
+// on the loading screen. Fields that are ready answer before the first question, so nothing flashes.
+// No answer, or nothing being built: the usual text stays. Returns a function that stops the questions.
+const LOADING_TEXT="Pulling frames from the archive…";
+function watchProgress(f, det, cad, src, stale){
+  const el=$("loading"), my=S.progId=(S.progId||0)+1; let timer=null, seen=false;
+  const mine=()=>my===S.progId && !stale();
+  el.textContent=LOADING_TEXT;
+  if(src==="wise") return ()=>{};   // WISE frames come from WiseView in one go
+  const tick=async()=>{
+    let p=null;
+    try{ p=await api.get("/api/progress",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det,cadence:cad}, 5000); }catch(e){}
+    if(!mine()) return;
+    const n=p?.total, k=n ? ` ${Math.min(p.done||0, n)} / ${n}` : "";
+    const t = !p ? "" : !p.active ? (seen ? "Building frames…" : "")
+      : p.stage==="irsa" ? "Asking NASA's archive which images cover this spot…"
+      : p.stage==="index" ? "NASA's archive is not answering. Searching our own index…"
+      : p.stage==="download" ? `Downloading ${n||""} image cutouts…${k}`
+      : p.stage==="saved" ? `Reading ${n||""} saved images…${k}`
+      : p.stage==="build" ? "Building frames…"
+      : p.stage==="search" ? "Finding the SPHEREx images of this spot…" : "";
+    if(p?.active) seen=true;
+    if(p) el.textContent = t || LOADING_TEXT;   // a missed answer keeps the last text
+    timer=setTimeout(tick, 1000);
+  };
+  timer=setTimeout(tick, 1200);
+  return ()=>{ clearTimeout(timer); if(my===S.progId) S.progId++; };   // the text stays until the next request resets it
 }
 
 /* ---------- loading a field (cases & free) ---------- */
@@ -1409,7 +1448,7 @@ async function scan(ra, dec, fov, key){
   [ra, dec, fov]=c;
   $("emptyState").style.display="none"; $("errState").style.display="none"; $("loading").classList.add("on");
   S.field = buildField(ra, dec, fov, key);
-  S.apiFrames=null;
+  S.apiFrames=null; $("srcNote").hidden=true;
   if(CONFIG.API_BASE){   // real data: a failure shows an error with a retry; the API stays on for the next scan
     S.field.live=true;
     try{ if(!await loadApiFrames()) return; }   // false: a newer scan or switch owns the viewer
@@ -1439,7 +1478,7 @@ function scanFailed(err, args){
     S.surpriseScan=null; (S.surpriseBad=S.surpriseBad||new Set()).add(sp.name);
     if(sp.hops<2){ toast("That field isn't ready", "The archive is slow right now. Picking another surprise…"); surprise(sp.hops+1); return; }
   }
-  $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
+  $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[]; $("srcNote").hidden=true;
   const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
   const alt=$("errAlt"), down = S.ctx==="free" && S.survey==="spherex" && (err.code==="archive_down" || err.code==="timeout");
   alt.hidden=true; alt.innerHTML=""; $("errState").classList.toggle("alt", down); $("retryBtn").className="btn btn-amber";
@@ -1490,7 +1529,8 @@ async function loadApiFrames(){
   try{
     for(;;){   // the detector or cadence may change while a scan is loading: ask again with the new one
       const det=S.det, cad=S.cadence, src=S.survey;
-      data=await api.frames(f.ra,f.dec,f.fov,det,"blink",cad,src);
+      const quiet=watchProgress(f, det, cad, src, stale);
+      try{ data=await api.frames(f.ra,f.dec,f.fov,det,"blink",cad,src); } finally{ quiet(); }
       if(stale()) return false;
       for(const fr of data.frames) fr.img=await loadImg(fr.png);
       if(data.diff) for(const fr of data.diff) fr.img=await loadImg(fr.png);
