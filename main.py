@@ -373,6 +373,43 @@ def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5)):
     return sky["_lens"]
 
 
+@app.get("/api/movers")
+def movers(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
+           detector: int = Query(4, ge=1, le=6)):
+    """Кандидаты в движущиеся объекты на сеансовых кадрах (cadence=visit) — movers.find_movers.
+
+    frames кандидата — индексы в том же порядке, что /api/frames?cadence=visit с тем же детектором;
+    positions — координаты фронтенда на этих кадрах. kind: "track" — пятно сдвинулось по прямой на
+    2+ кадрах (медленный объект), "transient" — пятно только на одном кадре (быстрый астероид или
+    артефакт; уверенность ниже). speed_arcsec_day — только у треков.
+    """
+    from movers import find_movers
+    try:
+        sky = _load_sky(ra, dec, fov, "visit", detector)
+    except SkyUnavailable as e:
+        raise HTTPException(503, str(e))
+    items = _det_items(sky, detector)
+    info = sky.get("info") or []
+    imgs = [f[2] for _, f in items]
+    if len(info) == len(sky["frames"]):
+        mjds = [(info[i]["mjd_min"] + info[i]["mjd_max"]) / 2 for i, _ in items]
+        nexp = [info[i]["n_exposures"] for i, _ in items]
+    else:   # без подписей кадров времени нет — связывать в треки нечем
+        mjds, nexp = list(range(len(imgs))), None
+    ny = sky["shape"][0]
+    out = []
+    for c in find_movers(imgs, mjds, nexp):
+        w = sky["wcs"].pixel_to_world(c["x"][0], c["y"][0])
+        out.append({
+            "kind": c["kind"], "frames": c["frames"],
+            "positions": [_to_display(x, y, ny) for x, y in zip(c["x"], c["y"])],
+            "ra": round(float(w.ra.deg), 6), "dec": round(float(w.dec.deg), 6),
+            "snr": round(c["snr"], 1), "confidence": round(c["confidence"], 2),
+            "speed_arcsec_day": round(c["speed_px_day"] * PIX_ARCSEC, 1) if c["speed_px_day"] else None,
+        })
+    return _clean({"n_frames": len(imgs), "candidates": out})
+
+
 @app.get("/api/track")
 def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
           detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$")):

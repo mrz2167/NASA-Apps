@@ -146,6 +146,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .hud{position:absolute;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:600;text-shadow:0 1px 4px #000}
 .hud.top{top:10px}.hud.bottom{bottom:10px}
 .hud .hot{color:var(--amber)}
+.mover-note{position:absolute;left:12px;bottom:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--amber)}
 .lens-note{position:absolute;left:12px;top:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--paper)}
 @media (max-width:520px){.lens-note{top:48px;font-size:11px}}   /* the top HUD wraps to two lines on phones */
 .scalebar{display:flex;align-items:center;gap:6px}
@@ -355,6 +356,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           <canvas id="sky" width="720" height="720" aria-label="Sky viewer"></canvas>
           <div class="hud top"><span id="hudEpoch">—</span><span class="hot" id="hudMode">BLINK</span></div>
           <div class="lens-note" id="lensNote" hidden></div>
+          <div class="mover-note" id="moverNote" hidden></div>
           <div class="hud bottom"><span id="hudDet">—</span><span class="scalebar"><i id="scaleI" style="width:40px"></i><span id="scaleT">30″</span></span></div>
           <div class="empty" id="emptyState">
             <div class="display">Pick a patch of sky.</div>
@@ -1076,6 +1078,7 @@ const api = {
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
   object(ra,dec){ return this.get("/api/object",{ra,dec}, 20000); },
+  movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f){ return this.get("/api/lens",{ra:f.ra,dec:f.dec,fov:f.fov}); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
 };
@@ -1210,6 +1213,7 @@ function drawOverlays(){
     for(const [sx,sy] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ ctx.beginPath(); ctx.moveTo(p.x+sx*r,p.y+sy*r*.45); ctx.lineTo(p.x+sx*r,p.y+sy*r); ctx.lineTo(p.x+sx*r*.45,p.y+sy*r); ctx.stroke(); }
     ctx.restore();
   }
+  drawMovers(px); moverNote();
 }
 function label(text,x,y,col){ ctx.font="600 13px Manrope"; ctx.fillStyle="rgba(7,10,32,.75)"; const w=ctx.measureText(text).width; ctx.fillRect(x-4,y-14,w+8,20); ctx.fillStyle=col; ctx.fillText(text,x,y+1); }
 function frameLabel(){ return S.apiFrames ? S.apiFrames.frames[S.epoch].label : S.field.epochs[S.epoch]; }
@@ -1260,6 +1264,42 @@ async function loadApiFrames(){
   f.stars=(data.sources||[]).map(s=>({x:s.x, y:s.y, f:1, det:[1,1,1,1,1,1], id:s.id||"Source"}));
   const key=f.target?.key||null;
   f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}} : null;
+  loadMovers();
+}
+
+// Moving candidates (asteroids, comets) on "Every visit" frames: spots that are there now but not on the
+// other frames. Fetched per field + detector; drawn as amber diamonds, solid on the frames they appear in.
+async function loadMovers(){
+  const f=S.field, key=f && S.apiFrames && S.cadence==="visit" ? `${f.ra},${f.dec},${f.fov},${S.det}` : null;
+  if(!key){ S.movers=null; moverNote(); return; }
+  if(S.movers?.key===key) return;
+  S.movers={key, field:f, list:null};
+  try{ const d=await api.movers(f, S.det); if(S.movers?.key===key) S.movers.list=d.candidates||[]; }
+  catch(e){ if(S.movers?.key===key) S.movers.list=[]; }
+  if(S.movers?.key===key){ moverNote(); draw(); }
+}
+function moverNote(){
+  const n=$("moverNote"), m=S.movers, list=m?.field===S.field ? m.list : null;
+  if(!n) return;
+  if(!list){ n.hidden=true; return; }
+  const k=list.length, tracks=list.filter(c=>c.kind==="track").length;
+  n.hidden=false;
+  n.textContent = k ? `${k} moving candidate${k>1?"s":""}${tracks?` (${tracks} with a track)`:""} — amber diamonds. Step through the frames and tap one.`
+                    : "No moving candidates on these frames.";
+}
+function drawMovers(px){
+  const m=S.movers, list=m?.field===S.field ? m.list : null;
+  if(!list || !list.length || S.cadence!=="visit") return;
+  ctx.save();
+  for(const c of list){
+    const pts=c.positions.map(q=>toCanvas(q.x,q.y)), on=c.frames.indexOf(S.epoch);
+    if(pts.length>1){ ctx.setLineDash([5,5]); ctx.strokeStyle="rgba(246,181,68,.55)"; ctx.lineWidth=1.5;
+      ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke(); ctx.setLineDash([]); }
+    pts.forEach((p,i)=>{ const r=Math.max(7,px*1.6), cur=i===on;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y-r); ctx.lineTo(p.x+r,p.y); ctx.lineTo(p.x,p.y+r); ctx.lineTo(p.x-r,p.y); ctx.closePath();
+      ctx.lineWidth=cur?2.5:1.5; ctx.strokeStyle=cur?"#F6B544":"rgba(246,181,68,.45)"; ctx.stroke(); });
+  }
+  ctx.restore();
 }
 
 /* ---------- playback ---------- */
