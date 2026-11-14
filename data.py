@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import time as _time
 import warnings
@@ -31,6 +32,8 @@ warnings.simplefilter("ignore", FITSFixedWarning)
 logging.getLogger("astropy").setLevel(logging.ERROR)  # шум про SIP у спектральной сетки
 
 IRSA = "https://irsa.ipac.caltech.edu/"
+# Откуда брать пиксели: "aws" (по умолчанию: бакет nasa-irsa-spherex, IRSA как запасной) или "irsa".
+SOURCE = os.environ.get("SKYWATCH_SOURCE", "aws").lower()
 CACHE = Path(__file__).resolve().parent / "cache"
 # Предпочтение при дублях одной экспозиции в разных релизах.
 RELEASE_PRIORITY = {"dr1": 0, "qr3": 1, "qr2": 2}
@@ -138,8 +141,29 @@ def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = 
     return t
 
 
+def _save(hdul, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    fits.HDUList([h.copy() for h in hdul]).writeto(tmp, overwrite=True)
+    tmp.replace(dest)
+
+
 def _download(url: str, dest: Path, retries: int = 3) -> None:
-    """Скачать вырезку и сохранить облегчённую копию (без тяжёлой таблицы EPSF)."""
+    """Вырезка -> облегчённая копия в кэше (без тяжёлой таблицы EPSF).
+
+    Сначала читаем нужные строки прямо из открытого бакета AWS (cloud.py, секунды),
+    при ошибке — сервис вырезок IRSA. SKYWATCH_SOURCE=irsa — только IRSA.
+    """
+    if SOURCE != "irsa":
+        from cloud import cutout_hdul
+        for attempt in range(2):
+            try:
+                _save(cutout_hdul(url), dest)
+                return
+            except Exception as e:
+                last = e
+                _time.sleep(1 + attempt)
+        print(f"  ! AWS не отдал вырезку ({last}); пробую сервис IRSA")
     for attempt in range(retries):
         try:
             with urlopen(url, timeout=conf.remote_timeout) as resp:
@@ -151,11 +175,7 @@ def _download(url: str, dest: Path, retries: int = 3) -> None:
             _time.sleep(10 * (attempt + 1))
     import io
     with fits.open(io.BytesIO(raw)) as hdul:
-        keep = [hdul[0]] + [h for h in hdul[1:] if h.name in ("IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE")]
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(".tmp")
-        fits.HDUList([h.copy() for h in keep]).writeto(tmp, overwrite=True)
-        tmp.replace(dest)
+        _save([hdul[0]] + [h for h in hdul[1:] if h.name in ("IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE")], dest)
 
 
 def cutout_path(url: str) -> Path:
@@ -197,7 +217,7 @@ def load_cutout(url: str, time: float | None = None, retries: int = 3) -> dict:
         }
 
 
-def load_cutouts(table: Table, max_workers: int = 8, progress: bool = True,
+def load_cutouts(table: Table, max_workers: int = 16, progress: bool = True,
                  on_progress=None, offline: bool = False) -> list[dict]:
     """Загрузить все вырезки из таблицы find_images (параллельно, через кэш).
 
