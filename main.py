@@ -13,6 +13,7 @@ import base64
 import io
 import os
 import threading
+import time
 import warnings
 from collections import OrderedDict
 from typing import Annotated, Literal
@@ -152,6 +153,80 @@ _LOCK = threading.Lock()
 _MAX_SKIES = 32          # ~6–30 MB per field; the demo fields, visits and WISE all fit
 
 
+# ---------- progress of a field being built, and where its exposure list came from ----------
+# /api/frames is one blocking request; while it builds a new field (10–200 s) the site polls /api/progress.
+# The record lives only while the build runs: fields already in memory or on disk never get one.
+_PROGRESS: dict = {}                 # field key -> {"stage", "done", "total", "t0"}
+_BUILD = threading.local()           # .key: field this thread is building; .search: how its list was found
+
+
+def _prog(stage: str, done: int | None = None, total: int | None = None) -> None:
+    key = getattr(_BUILD, "key", None)
+    if key is None:
+        return
+    old = _PROGRESS.get(key)
+    _BUILD.fresh = True
+    _PROGRESS[key] = {"stage": stage, "done": done, "total": total, "t0": old["t0"] if old else time.time()}
+
+
+def _on_saved(i: int, n: int) -> None:        # cutouts read from our own disk (offline pass)
+    _prog("build" if i >= n else "saved", i, n)
+
+
+def _on_download(i: int, n: int) -> None:     # cutouts fetched from the AWS bucket / IRSA (or already on disk)
+    _prog("build" if i >= n else "download", i, n)
+
+
+def _watch_search() -> None:
+    """Note which route data.find_images takes: IRSA's search, our own index of the AWS bucket, or neither
+    (a stored query). Wraps two helpers of data.py from here, so data.py itself stays untouched (editing it
+    would invalidate every saved sky, see skycache.CODE_HASH). If the helpers are renamed, this does nothing."""
+    import data as _data
+    tap, index = getattr(_data, "_tap", None), getattr(_data, "_from_index", None)
+    if tap is None or index is None or getattr(tap, "_watched", False):
+        return
+
+    def _tap(*a, **kw):
+        _prog("irsa")
+        out = tap(*a, **kw)
+        _BUILD.search = "irsa"
+        return out
+
+    def _from_index(*a, **kw):
+        _prog("index")
+        out = index(*a, **kw)
+        if out is not None:
+            _BUILD.search = "aws-index"
+        return out
+
+    _tap._watched = True
+    _data._tap, _data._from_index = _tap, _from_index
+
+
+_watch_search()
+
+
+def _tracks_progress(load):
+    """Decorator for _load_sky: names the field this thread is working on and clears its record afterwards."""
+    import functools
+
+    @functools.wraps(load)
+    def wrapped(ra, dec, fov, cadence="pass", det=None, remember=True):
+        c, d = (cadence, det) if cadence == "visit" else ("pass", None)
+        key = (round(ra, 4), round(dec, 4), round(fov, 4), c, d)        # same key as in _load_sky
+        prev = getattr(_BUILD, "key", None)
+        _BUILD.key = key
+        if prev is None:
+            _BUILD.search = "saved"
+        try:
+            return load(ra, dec, fov, cadence, det, remember)
+        finally:
+            _BUILD.key = prev
+            _PROGRESS.pop(key, None)
+    return wrapped
+
+
+@_tracks_progress
 def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int | None = None,
               remember: bool = True) -> dict:
     """Кадры для места: сначала полный набор из кэша на диске, иначе быстрый режим.
@@ -185,21 +260,24 @@ def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int
         return sky
     degraded = False
     try:
-        full = get_sky(ra, dec, fov, quick=False, offline=True, detectors=dets, cadence=cadence)
+        full = get_sky(ra, dec, fov, quick=False, offline=True, detectors=dets, cadence=cadence,
+                       on_progress=_on_saved)
         if full["n_loaded"] >= 0.8 * full["n_wanted"]:
             sky = full
     except SkyUnavailable:
         pass
     if sky is None:
         kw = dict(quick=True, detectors=dets, cadence=cadence)
+        _prog("search")
         try:
-            sky = get_sky(ra, dec, fov, **kw)
+            sky = get_sky(ra, dec, fov, on_progress=_on_download, **kw)
         except SkyUnavailable as net_err:
             try:
-                sky = get_sky(ra, dec, fov, offline=True, **kw)  # архив лёг — что есть в кэше
+                sky = get_sky(ra, dec, fov, offline=True, on_progress=_on_saved, **kw)  # архив лёг — что есть в кэше
             except SkyUnavailable:
                 raise net_err from None       # say "the archive isn't answering", not "offline mode"
             degraded = True
+    sky["search"] = getattr(_BUILD, "search", "saved")   # "irsa" | "aws-index" | "saved": shown on the site
     if not degraded:                          # a stop-gap set from a dead archive isn't worth keeping for a week
         sky = skycache.put(key, sky)          # to disk for the next restart; keep the slim copy in memory
     if remember:
@@ -455,6 +533,7 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
     """
     if source == "wise":
         return _wise_frames(ra, dec, fov)
+    _BUILD.fresh = False
     try:
         sky = _load_sky(ra, dec, fov, cadence, detector)
     except SkyUnavailable as e:
@@ -499,8 +578,33 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
         "meta": {"source": sky["source"], "n_images": sky["n_loaded"], "warnings": sky["warnings"],
                  "wavelength_um": [info[i]["wavelength_um"] for i, _ in items] if info else None,
                  "n_exposures": [info[i]["n_exposures"] for i, _ in items] if info else None,
-                 "cadence": cadence},
+                 "cadence": cadence,
+                 # how the list of exposures was found when this field was built: "irsa" (NASA's archive),
+                 # "aws-index" (our own index of NASA's AWS bucket; IRSA was not answering) or "saved"
+                 # (a stored search or a saved field; no archive call). fresh: built by this very request.
+                 "search": sky.get("search") or "saved", "fresh": bool(getattr(_BUILD, "fresh", False))},
     })
+
+
+@app.get("/api/progress")
+def progress(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, cadence: CADENCE = "pass"):
+    """What the server is doing for a field that `/api/frames` is building right now. Never builds anything.
+
+    `{"active": false}` when nothing is being built for this field (it is ready, or nobody asked). Otherwise
+    `stage`: `search` (looking up which exposures cover the spot), `irsa` (asking NASA's IRSA archive),
+    `index` (IRSA is not answering: our own index of the AWS bucket), `download` (fetching cutouts,
+    `done`/`total`), `saved` (reading cutouts already on our disk, `done`/`total`), `build` (stacking frames);
+    plus `elapsed_s`.
+    """
+    r4 = lambda v: round(v, 4)
+    visit = (cadence, detector) if cadence == "visit" else ("pass", None)
+    for f in (fov, 0.1):                       # fields under 0.1° are cut from the 0.1° one
+        for c, d in (visit, ("pass", None)):   # a visit request also needs the per-pass set (chemistry)
+            rec = _PROGRESS.get((r4(ra), r4(dec), r4(f), c, d))
+            if rec:
+                return {"active": True, "stage": rec["stage"], "done": rec["done"], "total": rec["total"],
+                        "elapsed_s": round(time.time() - rec["t0"], 1)}
+    return {"active": False}
 
 
 LENS_RGB = {"water": (0x3D, 0x5B, 0xD9), "methane": (0xF0, 0x7A, 0x3A),

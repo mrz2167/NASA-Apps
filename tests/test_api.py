@@ -95,6 +95,45 @@ def test_bad_params_are_422(base, path):
     assert requests.get(base + path).status_code == 422
 
 
+def test_progress_is_idle_and_builds_nothing(base):
+    r = requests.get(base + "/api/progress?ra=10&dec=0&fov=0.1", timeout=5)
+    assert r.status_code == 200 and r.json() == {"active": False}
+    assert requests.get(base + "/api/health").json()["cached_fields"] == 0
+    assert requests.get(base + "/api/progress?ra=10&dec=0&cadence=daily").status_code == 422
+
+
+def test_progress_and_search_route_are_recorded(monkeypatch):
+    """A build reports its stages under the field's key, notes the route of the exposure list, and cleans up."""
+    import main
+    seen = []
+
+    def fake_get_sky(ra, dec, fov, offline=False, on_progress=None, **kw):
+        if offline:
+            raise main.SkyUnavailable("nothing saved")
+        import data
+        assert data._from_index(ra, dec, fov) == "table"      # the route data.find_images takes when IRSA is down
+        on_progress(1, 2)
+        seen.append(dict(main._PROGRESS[(10.0, 0.0, 0.1, "pass", None)]))
+        return {"cadence": "pass"}
+
+    monkeypatch.setattr(main, "get_sky", fake_get_sky)
+    monkeypatch.setattr(main.skycache, "get", lambda key: None)
+    monkeypatch.setattr(main.skycache, "put", lambda key, sky: sky)
+    monkeypatch.setattr(main, "_start_gaia", lambda sky: None)
+    monkeypatch.setattr(main, "_SKIES", type(main._SKIES)())
+    import data
+    inner = data._from_index
+    monkeypatch.setattr(data, "_from_index", inner)            # restored after the test
+    import s3index
+    monkeypatch.setattr(s3index, "find", lambda ra, dec, size: ["row"])
+    monkeypatch.setattr(data, "_from_index", lambda *a, **kw: (inner(*a, **kw) and "table"))
+    sky = main._load_sky(10.0, 0.0, 0.1)
+    assert sky["search"] == "aws-index"
+    assert seen and seen[0]["stage"] == "download" and (seen[0]["done"], seen[0]["total"]) == (1, 2)
+    assert main._PROGRESS == {}
+    assert main.progress(10.0, 0.0, 0.1, 4, "pass") == {"active": False}
+
+
 # ---------- user reports ----------
 
 def test_report_flow(base):
