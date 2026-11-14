@@ -116,6 +116,15 @@ def favicon():
     return Response(FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.get("/levels/{name}", include_in_schema=False)
+def level_file(name: str):
+    """Real frames for the training levels (make_training.py -> web/levels/)."""
+    import re
+    if not re.fullmatch(r"[a-z0-9_]+\.(png|json)", name) or not (WEB / "levels" / name).is_file():
+        raise HTTPException(404, "No such file")
+    return FileResponse(WEB / "levels" / name)
+
+
 # ---------- кэш наборов кадров ----------
 
 _SKIES: "OrderedDict[tuple, dict]" = OrderedDict()
