@@ -185,5 +185,5 @@ if __name__ == "__main__":
     spec_all = get_spectrum(cutouts, RA, DEC)
     spec_d56 = get_spectrum(cutouts, RA, DEC, valid_detectors=[5, 6])
 
-    print("Точек (все детекторы):", len(spec_all["wavelength"]))
-    print("Точек (только D5, D6):", len(spec_d56["wavelength"]))
+    print("Points (all detectors):", len(spec_all["wavelength"]))
+    print("Points (D5, D6 only):", len(spec_d56["wavelength"]))

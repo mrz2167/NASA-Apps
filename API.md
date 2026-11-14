@@ -16,7 +16,7 @@ Enable CORS for the site's domain (or `*` during the hackathon).
 
 Returns the blink frames for one detector, already stacked per epoch and reprojected onto one grid.
 
-**Query:** `ra`, `dec`, `fov` (degrees, e.g. 0.1), `detector` (1–6), `mode` (always `blink` for now)
+**Query:** `ra` (0–360), `dec` (−90…+90), `fov` (degrees, more than 0.01 and at most 0.5; the site uses 0.05/0.1/0.2), `detector` (1–6), `mode` (only `blink` for now)
 
 `cadence` (optional): `pass` (default) — one frame per six-month sky pass; `visit` — each pass split into
 observing visits (a new frame after a > 12 h gap in that detector's exposures). SPHEREx sees a spot in
@@ -53,7 +53,9 @@ Rules:
 
 - **`frames`**: one PNG per epoch, all the same size (`size_px` × `size_px`), north up, east left. Stretch the brightness yourself (e.g. astropy `ZScaleInterval` or asinh) so the frontend can draw it as is. A PNG URL also works instead of a data URI.
 - **`diff`** (optional): frame minus the first frame, coloured however you like (suggested: positive = amber `#F6B544`, negative = blue `#3D5BD9`, zero = `#070A20`). If omitted, "What changed" shows the normal frames.
-- **`sources`** (optional): bright sources in pixel coordinates of the grid, so users can click them.
+- **`sources`** (optional): bright sources in pixel coordinates of the grid, so users can click them. Peaks on the flat
+  core of a saturated star are merged into one source, and each Gaia DR3 ID is given to at most one source (the
+  nearest); the rest are labelled `SPHEREx src N`.
 - **`target`** (optional): the tracked object. `positions` has one entry per frame, pixel coordinates on the grid (x right, y down, 0 at the top-left corner). It drives the Trail line and the molecule lens glow.
 
 ---
@@ -161,6 +163,14 @@ def obj(ra: float, dec: float):
 ```
 
 Run locally: `uvicorn main:app --reload`, then set `API_BASE: "http://localhost:8000"` and open `index.html`.
+
+## Errors
+
+- Invalid parameters (out of range, wrong type, unknown `mode`/`cadence`) return **422** with a readable English
+  `detail` string, e.g. `{"detail": "Invalid parameter 'ra': Input should be less than or equal to 360 (got '400').",
+  "errors": [{"param": "ra", "message": "..."}]}`. The same ranges are listed in `/docs`.
+- No SPHEREx data / archive down: **503** with `detail`; detector without frames in the field: **404**.
+- All response text (labels, verdicts, warnings, errors) is English.
 
 ## Notes
 

@@ -15,13 +15,15 @@ import os
 import threading
 import warnings
 from collections import OrderedDict
+from typing import Annotated, Literal
 
 import numpy as np
 from astropy.coordinates import SkyCoord
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 
@@ -33,7 +35,54 @@ from astropy.table import Table
 
 warnings.filterwarnings("ignore")
 
-app = FastAPI(title="LUMEN Skywatch API")
+app = FastAPI(
+    title="LUMEN Skywatch API",
+    description="Real NASA SPHEREx data for LUMEN Space Academy: blink frames, difference images, "
+                "molecule lens maps, moving-object candidates and object cards. "
+                "All coordinates are ICRS degrees. Invalid parameters return 422 with a readable message.",
+)
+
+
+# ---------- проверка параметров: 422 с понятным английским сообщением ----------
+
+def _param_name(e: dict) -> str:
+    return ".".join(str(x) for x in e.get("loc", ()) if x not in ("query", "body", "path")) or "request"
+
+
+def _err_text(e: dict) -> str:
+    msg, got = e.get("msg", "invalid value"), e.get("input")
+    if got is None or isinstance(got, (dict, list)):
+        return f"Invalid parameter '{_param_name(e)}': {msg}."
+    return f"Invalid parameter '{_param_name(e)}': {msg} (got {got!r})."
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    return JSONResponse(status_code=422, content={
+        "detail": " ".join(_err_text(e) for e in errors) or "Invalid request parameters.",
+        "errors": [{"param": _param_name(e), "message": e.get("msg")} for e in errors],
+    })
+
+
+@app.exception_handler(Exception)
+async def _unexpected_error(request: Request, exc: Exception):
+    print(f"[error] {request.url.path}: {exc!r}", flush=True)
+    return JSONResponse(status_code=500, content={
+        "detail": "Internal server error while processing SPHEREx data. Please try again or pick another field."})
+
+
+# Общие параметры запросов (ограничения видны в /docs)
+RA = Annotated[float, Query(ge=0, le=360, description="Right ascension of the field centre, degrees (0–360, ICRS).")]
+DEC = Annotated[float, Query(ge=-90, le=90, description="Declination of the field centre, degrees (−90…+90, ICRS).")]
+FOV = Annotated[float, Query(gt=0.01, le=0.5, description="Field of view (side of the square), degrees: more than "
+                                                          "0.01 and at most 0.5. The site uses 0.05, 0.1 or 0.2.")]
+DETECTOR = Annotated[int, Query(ge=1, le=6, description="SPHEREx detector 1–6 (D1 ≈ 0.75 µm … D6 ≈ 5 µm).")]
+CADENCE = Annotated[Literal["pass", "visit"], Query(
+    description="`pass`: one frame per six-month sky pass; `visit`: each pass split into observing visits.")]
+SOURCE = Annotated[Literal["spherex", "wise"], Query(
+    description="Survey: `spherex` (2025–26, six detectors) or `wise` (WISE/NEOWISE W2 4.6 µm, 2010–2024).")]
+MODE = Annotated[Literal["blink"], Query(description="Display mode; only `blink` is supported for now.")]
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "DELETE"], allow_headers=["*"])
 
 from reports import router as reports_router  # noqa: E402  общая таблица находок (/api/reports, /reports)
@@ -51,6 +100,20 @@ WEB = Path(__file__).resolve().parent / "web"
 @app.get("/", include_in_schema=False)
 def site():
     return FileResponse(WEB / "index.html")
+
+
+FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="6" fill="#0B1030"/>'
+    '<path fill="#F6B544" d="M16 4l3.2 8.1 8.6.6-6.6 5.5 2.1 8.4L16 22l-7.3 4.6 2.1-8.4-6.6-5.5 8.6-.6z"/>'
+    '</svg>'
+)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon():
+    return Response(FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ---------- кэш наборов кадров ----------
@@ -206,22 +269,38 @@ def _sources(img: np.ndarray, n: int = 40, sky: dict | None = None) -> list[dict
     med = np.median(v)
     sig = 1.4826 * np.median(np.abs(v - med))
     filled = fill_saturated(img)
-    t = find_peaks(np.nan_to_num(filled - med), threshold=5 * sig, box_size=5, npeaks=n, border_width=2)
+    t = find_peaks(np.nan_to_num(filled - med), threshold=5 * sig, box_size=5, npeaks=3 * n, border_width=2)
     if t is None:
         return []
     t.sort("peak_value", reverse=True)
+    # Пересвеченное ядро после fill_saturated — плато: find_peaks выдаёт на нём россыпь соседних «пиков».
+    # Склеиваем пики ближе SOURCE_MERGE_PX к более яркому в один источник (центр — среднее по плато).
+    groups: list[list] = []   # [x_ведущего, y_ведущего, пик_ведущего, [точки плато]]
+    for r in t:
+        x, y, p = float(r["x_peak"]), float(r["y_peak"]), float(r["peak_value"])
+        for g in groups:
+            if (g[0] - x) ** 2 + (g[1] - y) ** 2 <= SOURCE_MERGE_PX ** 2:
+                if p >= 0.98 * g[2]:
+                    g[3].append((x, y))
+                break
+        else:
+            groups.append([x, y, p, [(x, y)]])
+    pts = [tuple(np.mean(g[3], axis=0)) for g in groups][:n]
     ny = img.shape[0]
+
+    # Gaia: один номер Gaia — не больше чем одному источнику (ближайшему), остальным — общая подпись
     gaia = _gaia_for(sky) if sky is not None else None
-    out = []
-    for k, r in enumerate(t):
-        sid = f"SPHEREx src {k + 1}"
-        if gaia is not None:
-            c = sky["wcs"].pixel_to_world(float(r["x_peak"]), float(r["y_peak"]))
-            m = match_gaia(c, gaia, radius_arcsec=6.0)
-            if m:
-                sid = m["name"]
-        out.append(dict(_to_display(float(r["x_peak"]), float(r["y_peak"]), ny), id=sid))
-    return out
+    best: dict[str, tuple[float, int]] = {}   # имя Gaia -> (расстояние, индекс источника)
+    if gaia is not None:
+        for k, (x, y) in enumerate(pts):
+            m = match_gaia(sky["wcs"].pixel_to_world(x, y), gaia, radius_arcsec=6.0)
+            if m and (m["name"] not in best or m["sep_arcsec"] < best[m["name"]][0]):
+                best[m["name"]] = (m["sep_arcsec"], k)
+    names = {k: name for name, (_, k) in best.items()}
+    return [dict(_to_display(x, y, ny), id=names.get(k, f"SPHEREx src {k + 1}")) for k, (x, y) in enumerate(pts)]
+
+
+SOURCE_MERGE_PX = 3.0   # find_peaks(box_size=5) сам разводит пики на 3+ пкс; ближе — это плато пересвеченной звезды
 
 
 def _clean(o):
@@ -243,6 +322,7 @@ def _clean(o):
 
 @app.get("/api/health")
 def health():
+    """Liveness check: `ok` and how many fields are held in the in-memory cache."""
     return {"ok": True, "cached_fields": len(_SKIES)}
 
 
@@ -250,7 +330,8 @@ def _det_items(sky: dict, detector: int) -> list:
     """Кадры детектора в том порядке, в каком их показывает /api/frames (без шумных кадров)."""
     items = [(i, f) for i, f in enumerate(sky["frames"]) if f[1] == detector]
     if not items:
-        raise HTTPException(404, f"Нет кадров детектора {detector}; есть: {sorted(sky['by_det'])}")
+        raise HTTPException(404, f"No frames for detector {detector} in this field; available detectors: "
+                                 f"{sorted(int(d) for d in sky['by_det'])}.")
     info = sky.get("info") or []
     if len(items) > 2 and len(info) == len(sky["frames"]):   # без шумных кадров из 2–4 снимков
         n = np.array([info[i]["n_exposures"] for i, _ in items])
@@ -278,12 +359,15 @@ def _track(sky: dict, imgs: list, coord: SkyCoord) -> list[dict]:
 
 
 @app.get("/api/frames")
-def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-           detector: int = Query(4, ge=1, le=6), mode: str = "blink",
-           cadence: str = Query("pass", pattern="^(pass|visit)$"),
-           source: str = Query("spherex", pattern="^(spherex|wise)$")):
-    """cadence: "pass" — эпоха раз в полгода; "visit" — каждый проход SPHEREx порезан на сеансы съёмки (дни).
-    source="wise" — вместо SPHEREx кадры WISE/NEOWISE W2 2010–2024 (detector и cadence не используются)."""
+def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE = "blink",
+           cadence: CADENCE = "pass", source: SOURCE = "spherex"):
+    """Blink frames for one detector, stacked per epoch and reprojected onto one grid (north up, east left).
+
+    Also returns difference images (each frame minus the first), clickable bright sources (Gaia DR3 IDs where
+    matched; each Gaia ID goes to at most one source, the nearest) and the track of the central object.
+    `cadence=pass` gives one frame per sky pass; `cadence=visit` splits each pass into observing visits.
+    `source=wise` returns WISE/NEOWISE W2 frames from 2010–2024 instead (detector and cadence are ignored).
+    """
     if source == "wise":
         return _wise_frames(ra, dec, fov)
     try:
@@ -377,15 +461,16 @@ def _paint_from_spectrum(sky: dict, maps: dict, coord: SkyCoord) -> dict:
 
 
 @app.get("/api/lens")
-def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-         ora: float | None = None, odec: float | None = None):
-    """Карты молекул поля: где на картинке поглощение воды, метана, CO₂, CO сильнее, чем у соседей.
+def lens(ra: RA, dec: DEC, fov: FOV = 0.1,
+         ora: Annotated[float | None, Query(ge=0, le=360, description="RA of a clicked object, degrees (optional).")] = None,
+         odec: Annotated[float | None, Query(ge=-90, le=90, description="Dec of a clicked object, degrees (optional).")] = None):
+    """Molecule lens maps: where water, methane, CO₂ and CO absorption is stronger than in the surroundings.
 
-    Та же сетка и ориентация, что у кадров /api/frames с теми же ra, dec, fov.
-    maps — PNG с прозрачностью для наложения; peak — самая глубокая полоса в поле (0..1);
-    lit — сколько пикселей заметно светится.
-    ora, odec — объект, по которому кликнули: его пятно закрашивается по его спектру, если по пикселям
-    он слишком тусклый. Закраска запоминается для поля, так что следующие ответы её уже содержат.
+    Same grid and orientation as `/api/frames` with the same ra, dec, fov.
+    `maps` are transparent PNG overlays; `peak` is the deepest band in the field (0–1);
+    `lit` is how many pixels light up noticeably.
+    `ora`, `odec`: a clicked object. If it is too faint for the per-pixel map, its spot is painted from its
+    spectrum. The paint is remembered for the field, so later responses already include it.
     """
     from lens import molecule_maps
     try:
@@ -423,14 +508,13 @@ def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
 
 
 @app.get("/api/movers")
-def movers(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-           detector: int = Query(4, ge=1, le=6)):
-    """Кандидаты в движущиеся объекты на сеансовых кадрах (cadence=visit) — movers.find_movers.
+def movers(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4):
+    """Moving-object candidates (asteroids, comets) on the visit frames (`cadence=visit`).
 
-    frames кандидата — индексы в том же порядке, что /api/frames?cadence=visit с тем же детектором;
-    positions — координаты фронтенда на этих кадрах. kind: "track" — пятно сдвинулось по прямой на
-    2+ кадрах (медленный объект), "transient" — пятно только на одном кадре (быстрый астероид или
-    артефакт; уверенность ниже). speed_arcsec_day — только у треков.
+    A candidate's `frames` are indices in the same order as `/api/frames?cadence=visit` with the same detector;
+    `positions` are frontend pixel coordinates on those frames. `kind`: `track` means the spot moved along a
+    line over 2+ frames (slow object); `transient` means it appears on one frame only (fast asteroid or
+    artefact; lower confidence). `speed_arcsec_day` is given for tracks only.
     """
     from movers import find_movers
     try:
@@ -547,14 +631,17 @@ def _wise_track(ra: float, dec: float, fra: float, fdec: float, fov: float, fram
 
 
 @app.get("/api/track")
-def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-          detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$"),
-          source: str = Query("spherex", pattern="^(spherex|wise)$"), frame: int = Query(0, ge=0)):
-    """Путь выбранного объекта по кадрам поля (fra, fdec, fov, detector) — для «Trail» и линз.
-    source="wise": путь по кадрам WISE; frame — на каком кадре кликнули (оттуда ведём пятно).
+def track(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked point, degrees (0–360).")],
+          dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the clicked point, degrees (−90…+90).")],
+          fra: Annotated[float, Query(ge=0, le=360, description="RA of the field centre, degrees (0–360).")],
+          fdec: Annotated[float, Query(ge=-90, le=90, description="Dec of the field centre, degrees (−90…+90).")],
+          fov: FOV = 0.1, detector: DETECTOR = 4, cadence: CADENCE = "pass", source: SOURCE = "spherex",
+          frame: Annotated[int, Query(ge=0, description="Frame the user clicked on (WISE only: the spot is followed from there).")] = 0):
+    """Path of a selected object across the field's frames (fra, fdec, fov, detector), for Trail and lenses.
+    With `source=wise` the path is measured on the WISE/NEOWISE frames.
 
-    ra, dec — куда кликнули; клик притягивается к ближайшему источнику.
-    positions идут в том же порядке, что frames в /api/frames с теми же параметрами.
+    `ra`, `dec`: where the user clicked; the click snaps to the nearest source.
+    `positions` are in the same order as `frames` in `/api/frames` with the same parameters.
     """
     if source == "wise":
         return _wise_track(ra, dec, fra, fdec, fov, frame)
@@ -569,8 +656,7 @@ def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1
 
 
 _ANALYSES: "OrderedDict[tuple, dict]" = OrderedDict()
-TARGET_NAMES_EN = {"Звезда Барнарда": "Barnard's Star", "Эпсилон Индейца B": "Epsilon Indi B",
-                   "WISE 0855−0714": "WISE 0855−0714", "RW Возничего": "RW Aurigae", "R Дракона": "R Draconis"}
+TARGET_NAMES_EN: dict[str, str] = {}   # названия тестовых объектов в targets.py уже английские
 
 
 def _analysis(sky: dict, coord: SkyCoord, online: bool = False) -> dict:
@@ -618,7 +704,13 @@ def _cached_object(sky: dict, x: float, y: float):
 
 
 @app.get("/api/object")
-def obj(ra: float, dec: float):
+def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked point, degrees (0–360).")],
+        dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the clicked point, degrees (−90…+90).")]):
+    """Object card ("Who is it?") for a clicked point: motion, brightness variability, spectrum, molecules,
+    catalogue match (test targets, then Gaia DR3, then SIMBAD) and a plain-English verdict.
+
+    The click snaps to the nearest source. A cold request in a new field can take 15–25 s.
+    """
     coord = SkyCoord(ra, dec, unit="deg")
     sky = _sky_containing(ra, dec)
     if sky is None:

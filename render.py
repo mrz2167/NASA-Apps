@@ -181,7 +181,7 @@ def _det_items(sky: dict, detector: int, drop_sparse: bool = False):
     """
     items = [(i, f) for i, f in enumerate(sky["frames"]) if f[1] == detector]
     if not items:
-        raise ValueError(f"нет кадров детектора D{detector}; есть: {sorted(sky['by_det'])}")
+        raise ValueError(f"no frames for detector D{detector}; available: {sorted(sky['by_det'])}")
     info = sky.get("info") or []
     if drop_sparse and len(info) == len(sky["frames"]) and len(items) > 2:
         n = np.array([info[i]["n_exposures"] for i, _ in items])

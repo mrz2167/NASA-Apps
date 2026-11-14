@@ -99,7 +99,7 @@ def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = 
         if hit is not None:
             return Table.read(hit)
     if offline:
-        raise FileNotFoundError(f"нет кэша для RA={ra} Dec={dec} size={size_deg}")
+        raise FileNotFoundError(f"no cache for RA={ra} Dec={dec} size={size_deg}")
 
     query = f"""
     SELECT a.uri, p.time_bounds_lower, p.energy_bandpassname,
@@ -163,7 +163,7 @@ def _download(url: str, dest: Path, retries: int = 3) -> None:
             except Exception as e:
                 last = e
                 _time.sleep(1 + attempt)
-        print(f"  ! AWS не отдал вырезку ({last}); пробую сервис IRSA")
+        print(f"  ! AWS did not return the cutout ({last}); trying the IRSA service")
     for attempt in range(retries):
         try:
             with urlopen(url, timeout=conf.remote_timeout) as resp:
@@ -231,7 +231,7 @@ def load_cutouts(table: Table, max_workers: int = 16, progress: bool = True,
         try:
             return load_cutout(row["url"], time=row["time"])
         except Exception as e:  # сеть/архив: не роняем всю загрузку
-            print(f"  ! пропуск {row['obs_id']}: {e}")
+            print(f"  ! skipping {row['obs_id']}: {e}")
             return None
 
     out, n = [], len(table)
@@ -240,7 +240,7 @@ def load_cutouts(table: Table, max_workers: int = 16, progress: bool = True,
             if c is not None:
                 out.append(c)
             if progress and (i % 25 == 0 or i == n):
-                print(f"  вырезки: {i}/{n}")
+                print(f"  cutouts: {i}/{n}")
             if on_progress is not None:
                 on_progress(i, n)
     return out
