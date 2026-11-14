@@ -154,7 +154,9 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .hud{position:absolute;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:600;text-shadow:0 1px 4px #000}
 .hud.top{top:10px}.hud.bottom{bottom:10px}
 .hud .hot{color:var(--amber)}
+.mover-note{position:absolute;left:12px;bottom:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--amber)}
 .lens-note{position:absolute;left:12px;top:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--paper)}
+@media (max-width:520px){.lens-note{top:48px;font-size:11px}}   /* the top HUD wraps to two lines on phones */
 .scalebar{display:flex;align-items:center;gap:6px}
 .scalebar i{display:block;height:2px;background:var(--paper)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;color:var(--muted)}
@@ -363,6 +365,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           <canvas id="sky" width="720" height="720" aria-label="Sky viewer"></canvas>
           <div class="hud top"><span id="hudEpoch">—</span><span class="hot" id="hudMode">BLINK</span></div>
           <div class="lens-note" id="lensNote" hidden></div>
+          <div class="mover-note" id="moverNote" hidden></div>
           <div class="hud bottom"><span id="hudDet">—</span><span class="scalebar"><i id="scaleI" style="width:40px"></i><span id="scaleT">30″</span></span></div>
           <div class="empty" id="emptyState">
             <div class="display">Pick a patch of sky.</div>
@@ -611,7 +614,9 @@ const PATCHES = [
   {name:"Barnard's Star", ra:TARGETS.barnard.ra, dec:TARGETS.barnard.dec, key:"barnard"},
   {name:"WISE 0855 · coldest brown dwarf", ra:TARGETS.wise0855.ra, dec:TARGETS.wise0855.dec, key:"wise0855"},
   {name:"Near Luhman 16", ra:162.328, dec:-53.319, key:null},
-  {name:"R Draconis", ra:TARGETS.rdra.ra, dec:TARGETS.rdra.dec, key:"rdra"}
+  {name:"R Draconis", ra:TARGETS.rdra.ra, dec:TARGETS.rdra.dec, key:"rdra"},
+  // young star in Ophiuchus behind an edge-on icy disk: SPHEREx spectrum dips at 4.3 µm (CO₂ ice) and 4.6 µm (CO ice)
+  {name:"CRBR 2422.8 · icy protostar (CO₂, CO)", ra:246.8525, dec:-24.6842, key:null}
 ];
 
 const RANKS = [[0,"Cadet"],[100,"Observer"],[250,"Hunter"],[650,"Explorer"],[1250,"Pathfinder"]];
@@ -1110,7 +1115,8 @@ const api = {
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },   // a new patch of sky can take ~a minute
+  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
+  movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
 };
@@ -1145,12 +1151,13 @@ function draw(){
   if(S.apiFrames){
     const fr = S.mode==="diff" && S.apiFrames.diff ? S.apiFrames.diff[S.epoch] : S.apiFrames.frames[S.epoch];
     if(fr && fr.img) ctx.drawImage(fr.img, v.sx*fr.img.width/N, v.sy*fr.img.height/N, v.sw*fr.img.width/N, v.sw*fr.img.height/N, 0,0,W,W);
-    // molecule lens: dim the sky a little and paint where the light dips in that molecule's band
-    const lm = S.lens!=="none" && S.mode!=="diff" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
-    if(lm){
+    // molecule lens: dim the sky a little and paint where the light dips in that molecule's band.
+    // In "What changed" the diff colours carry the story, so the map goes on as an outline + light tint.
+    const lm = S.lens!=="none" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
+    if(lm && S.mode!=="diff"){
       ctx.fillStyle="rgba(7,10,32,.45)"; ctx.fillRect(0,0,W,W);
       ctx.drawImage(lm, v.sx*lm.width/N, v.sy*lm.height/N, v.sw*lm.width/N, v.sw*lm.height/N, 0,0,W,W);
-    }
+    } else if(lm) drawLensOutline(lm, N);
   } else {
     if(off.width!==N){ off.width=N; off.height=N; }
     const id=octx.createImageData(N,N), cur=S.frames[S.epoch], ref=S.frames[0];
@@ -1171,6 +1178,33 @@ function draw(){
   drawOverlays();
   updateHud();
 }
+// Lens map as pixel-edge outlines (for "What changed"): edges of the lit pixels, cached per map image.
+function lensEdges(img){
+  if(img._edges) return img._edges;
+  const w=img.width, h=img.height, c=document.createElement("canvas"); c.width=w; c.height=h;
+  const g=c.getContext("2d"); g.drawImage(img,0,0); const a=g.getImageData(0,0,w,h).data;
+  const on=(x,y)=>x>=0&&y>=0&&x<w&&y<h&&a[(y*w+x)*4+3]>40;   // alpha 40 ≈ band depth 0.14
+  const segs=[], cells=[];
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    if(!on(x,y)) continue;
+    cells.push([x,y,a[(y*w+x)*4+3]/255]);
+    if(!on(x,y-1)) segs.push([x,y,x+1,y]);
+    if(!on(x,y+1)) segs.push([x,y+1,x+1,y+1]);
+    if(!on(x-1,y)) segs.push([x,y,x,y+1]);
+    if(!on(x+1,y)) segs.push([x+1,y,x+1,y+1]);
+  }
+  return img._edges={segs, cells, w};
+}
+function drawLensOutline(img, N){
+  const e=lensEdges(img), k=N/e.w, col=MOLS[S.lens].color, px=canvas.width/view().sw;
+  ctx.save();
+  for(const [x,y,al] of e.cells){ const p=toCanvas(x*k,y*k); ctx.globalAlpha=.22*al; ctx.fillStyle=col; ctx.fillRect(p.x,p.y,px*k+.5,px*k+.5); }
+  ctx.globalAlpha=1; ctx.lineCap="round";
+  const path=()=>{ ctx.beginPath(); for(const [x1,y1,x2,y2] of e.segs){ const a=toCanvas(x1*k,y1*k), b=toCanvas(x2*k,y2*k); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); } };
+  path(); ctx.strokeStyle="rgba(7,10,32,.9)"; ctx.lineWidth=5; ctx.stroke();   // dark halo keeps it readable over red/blue
+  path(); ctx.strokeStyle=col; ctx.lineWidth=2.4; ctx.stroke();
+  ctx.restore();
+}
 function drawOverlays(){
   const f=S.field, W=canvas.width, px=W/view().sw;
   if(S.hintQuad && f.target){
@@ -1182,8 +1216,7 @@ function drawOverlays(){
     let msg="", col="";
     if(S.lens!=="none" && S.apiFrames){
       const sym=MOLS[S.lens].sym, lm=S.lensMaps?.field===f ? S.lensMaps : null;
-      if(S.mode==="diff") msg=`${sym} map: switch to Blink to see it`;
-      else if(lm && lm.lit[S.lens]>0){ msg=`Coloured where the light dips in the ${sym} band`; col=MOLS[S.lens].color; }
+      if(lm && lm.lit[S.lens]>0){ msg = S.mode==="diff" ? `Outlined where the light dips in the ${sym} band` : `Coloured where the light dips in the ${sym} band`; col=MOLS[S.lens].color; }
       else if(lm) msg=`No ${sym} signs in this field`;
       else if(S.lensLoading===f) msg=`Reading the spectra for the ${sym} map…`;
     }
@@ -1202,7 +1235,7 @@ function drawOverlays(){
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,px*4.5*cl,0,7); ctx.fill();
       ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       label(`${MOLS[S.lens].sym} SIGN ${sc.toFixed(2)}`, p.x+px*3, p.y-px*3, col);
-    } else if(!(S.lensMaps?.field===f && S.mode!=="diff")){   // with the per-pixel map on, the colours speak for themselves
+    } else if(S.lensMaps?.field!==f){   // with the per-pixel map on (fill or outline), the map speaks for itself
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
       label(checking ? `${MOLS[S.lens].sym} · checking…` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
@@ -1233,6 +1266,7 @@ function drawOverlays(){
     for(const [sx,sy] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ ctx.beginPath(); ctx.moveTo(p.x+sx*r,p.y+sy*r*.45); ctx.lineTo(p.x+sx*r,p.y+sy*r); ctx.lineTo(p.x+sx*r*.45,p.y+sy*r); ctx.stroke(); }
     ctx.restore();
   }
+  drawMovers(px); moverNote();
 }
 function label(text,x,y,col){ ctx.font="600 13px Manrope"; ctx.fillStyle="rgba(7,10,32,.75)"; const w=ctx.measureText(text).width; ctx.fillRect(x-4,y-14,w+8,20); ctx.fillStyle=col; ctx.fillText(text,x,y+1); }
 function frameLabel(){ return S.apiFrames ? S.apiFrames.frames[S.epoch].label : S.field.epochs[S.epoch]; }
@@ -1242,7 +1276,13 @@ function updateHud(){
   $("frameCap").textContent = lab;
   $("epochIn").max = nE()-1;
   $("hudMode").textContent = {blink:"BLINK",diff:"WHAT CHANGED",trail:"TRAIL"}[S.mode] + (S.lens!=="none"?` · ${MOLS[S.lens].sym} LENS`:"");
-  $("hudDet").innerHTML = S.ctx==="training" ? (S.field.sim||"") .split(" · ")[0] : `Detector ${S.det} · <span style="text-transform:none">${DETECTORS[S.det-1].range}</span>`;
+  // Real data: the wavelength this frame saw the centre at. SPHEREx's filter varies across the detector,
+  // so frames of one detector differ a little in wavelength (a lot between visits) and stars flicker slightly.
+  const meta=S.apiFrames?.meta||{}, wl=meta.wavelength_um?.[S.epoch], nx=meta.n_exposures?.[S.epoch];
+  const narrow=canvas.getBoundingClientRect().width<460, lam=Number.isFinite(wl)?` · <span style="text-transform:none">λ ${wl.toFixed(2)} µm</span>`:"";
+  $("hudDet").innerHTML = S.ctx==="training" ? (S.field.sim||"") .split(" · ")[0]
+    : (narrow && lam ? `D${S.det}` : `Detector ${S.det} · <span style="text-transform:none">${DETECTORS[S.det-1].range}</span>`) + lam;
+  $("frameCap").title = S.ctx!=="training" && (lam || nx) ? [Number.isFinite(wl)?`seen at ${wl.toFixed(2)} µm`:"", nx?`${nx} exposures stacked`:""].filter(Boolean).join(" · ") : "";
   const pxCanvas = canvas.getBoundingClientRect().width / view().sw; const arcsec=30;
   $("scaleI").style.width = Math.max(8, pxCanvas*arcsec/CONFIG.PIX_ARCSEC)+"px"; $("scaleT").textContent=arcsec+"″";
   $("epochIn").value=S.epoch;
@@ -1277,6 +1317,42 @@ async function loadApiFrames(){
   f.stars=(data.sources||[]).map(s=>({x:s.x, y:s.y, f:1, det:[1,1,1,1,1,1], id:s.id||"Source"}));
   const key=f.target?.key||null;
   f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}} : null;
+  loadMovers();
+}
+
+// Moving candidates (asteroids, comets) on "Every visit" frames: spots that are there now but not on the
+// other frames. Fetched per field + detector; drawn as amber diamonds, solid on the frames they appear in.
+async function loadMovers(){
+  const f=S.field, key=f && S.apiFrames && S.cadence==="visit" ? `${f.ra},${f.dec},${f.fov},${S.det}` : null;
+  if(!key){ S.movers=null; moverNote(); return; }
+  if(S.movers?.key===key) return;
+  S.movers={key, field:f, list:null};
+  try{ const d=await api.movers(f, S.det); if(S.movers?.key===key) S.movers.list=d.candidates||[]; }
+  catch(e){ if(S.movers?.key===key) S.movers.list=[]; }
+  if(S.movers?.key===key){ moverNote(); draw(); }
+}
+function moverNote(){
+  const n=$("moverNote"), m=S.movers, list=m?.field===S.field ? m.list : null;
+  if(!n) return;
+  if(!list){ n.hidden=true; return; }
+  const k=list.length, tracks=list.filter(c=>c.kind==="track").length;
+  n.hidden=false;
+  n.textContent = k ? `${k} moving candidate${k>1?"s":""}${tracks?` (${tracks} with a track)`:""} — amber diamonds. Step through the frames and tap one.`
+                    : "No moving candidates on these frames.";
+}
+function drawMovers(px){
+  const m=S.movers, list=m?.field===S.field ? m.list : null;
+  if(!list || !list.length || S.cadence!=="visit") return;
+  ctx.save();
+  for(const c of list){
+    const pts=c.positions.map(q=>toCanvas(q.x,q.y)), on=c.frames.indexOf(S.epoch);
+    if(pts.length>1){ ctx.setLineDash([5,5]); ctx.strokeStyle="rgba(246,181,68,.55)"; ctx.lineWidth=1.5;
+      ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke(); ctx.setLineDash([]); }
+    pts.forEach((p,i)=>{ const r=Math.max(7,px*1.6), cur=i===on;
+      ctx.beginPath(); ctx.moveTo(p.x,p.y-r); ctx.lineTo(p.x+r,p.y); ctx.lineTo(p.x,p.y+r); ctx.lineTo(p.x-r,p.y); ctx.closePath();
+      ctx.lineWidth=cur?2.5:1.5; ctx.strokeStyle=cur?"#F6B544":"rgba(246,181,68,.45)"; ctx.stroke(); });
+  }
+  ctx.restore();
 }
 
 /* ---------- playback ---------- */
@@ -1342,7 +1418,7 @@ async function followTrack(ra, dec){
 // Frames: one per six-month sky pass, or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
 bindSeg("cadSeg","c", async c=>{
   S.cadence=c; track("cadence",{val:c});
-  $("cadHint").textContent = c==="visit" ? "a frame every few days: more frames, a bit noisier" : "one frame per sky pass";
+  $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
   if(!S.apiFrames) return;
   stop(); $("loading").classList.add("on");
   try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); }
