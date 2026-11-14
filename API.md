@@ -18,6 +18,13 @@ Returns the blink frames for one detector, already stacked per epoch and reproje
 
 **Query:** `ra`, `dec`, `fov` (degrees, e.g. 0.1), `detector` (1–6), `mode` (always `blink` for now)
 
+`cadence` (optional): `pass` (default) — one frame per six-month sky pass; `visit` — each pass split into
+observing visits (a new frame after a > 12 h gap in that detector's exposures). SPHEREx sees a spot in
+bursts a few days apart, so `visit` gives 7–12 frames instead of 2–4 (deep fields near the ecliptic poles:
+capped at 36), each stacked from ~2–6 exposures, so noisier. Labels become `"2025-10-31 · Frame 2"`.
+`meta.n_exposures` lists the exposures per frame. `/api/track` takes the same `cadence` and returns
+positions in the same frame order.
+
 **Response:**
 
 ```json

@@ -32,7 +32,8 @@ class SkyUnavailable(RuntimeError):
 
 
 def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, per_group: int = 3,
-            detectors=None, offline: bool = False, on_progress=None, verbose: bool = False) -> dict:
+            detectors=None, offline: bool = False, on_progress=None, verbose: bool = False,
+            cadence: str = "pass") -> dict:
     """Координаты (градусы) -> кадры, подписи, разности.
 
     quick=True    — не больше per_group снимков на (эпоху, детектор): ~50 вырезок, 1–2 минуты.
@@ -40,6 +41,9 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
     detectors     — например [6] или [5, 6], чтобы качать только нужные детекторы.
     offline=True  — не ходить в сеть, только кэш.
     on_progress(i, n) — колбэк прогресса загрузки вырезок.
+    cadence       — "pass": эпоха = полугодовой проход; "visit": проход режется на сеансы съёмки
+                    (epochs.split_cadence; передавайте один детектор), быстрый режим тогда берёт
+                    per_group снимков на сеанс.
     """
     coord = SkyCoord(ra, dec, unit="deg")
     warnings: list[str] = []
@@ -58,7 +62,8 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
     if detectors is not None:
         table = table[[d in detectors for d in table["detector"]]]
     if quick:
-        table = select_exposures(table, per_group)
+        table = select_exposures(table, per_group, cadence)
+    n_wanted = len(table)
 
     cutouts = load_cutouts(table, progress=verbose, on_progress=on_progress, offline=offline)
     if offline:
@@ -76,7 +81,7 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
         raise SkyUnavailable("Не удалось загрузить ни одного снимка: архив недоступен, кэша нет.")
 
     info: list[dict] = []
-    frames = build_frames(cutouts, coord, size_deg, info=info)
+    frames = build_frames(cutouts, coord, size_deg, info=info, cadence=cadence)
     if not frames:
         raise SkyUnavailable("Снимков слишком мало, чтобы собрать кадры.")
     by_det = frames_by_detector(frames)
@@ -87,8 +92,8 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
     return dict(
         coord=coord, size_deg=size_deg, wcs=wcs, shape=shape,
         frames=frames, info=info, diffs=diff_frames(frames), by_det=by_det,
-        cutouts=cutouts, n_found=n_found, n_loaded=len(cutouts),
-        source=source, quick=quick, warnings=warnings,
+        cutouts=cutouts, n_found=n_found, n_wanted=n_wanted, n_loaded=len(cutouts),
+        source=source, quick=quick, warnings=warnings, cadence=cadence, detectors=detectors,
     )
 
 

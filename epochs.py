@@ -48,7 +48,40 @@ def split_epochs(times, gap_days: float = EPOCH_GAP_DAYS,
     return labels
 
 
-def select_exposures(table, per_group: int | None = None):
+VISIT_GAP_HOURS = 12  # cadence="visit": разрыв > 12 ч внутри прохода = новый сеанс съёмки
+
+
+def split_cadence(times, cadence: str = "pass") -> np.ndarray:
+    """MJD -> номер кадра.
+
+    cadence="pass"  — эпоха = полугодовой проход (split_epochs).
+    cadence="visit" — каждый проход дополнительно режется на сеансы съёмки: новый кадр, когда между
+                      снимками больше VISIT_GAP_HOURS. Один детектор видит точку серией за 1–9 дней
+                      (изредка до 40), так что вместо 1 эпохи выходит 3–8 кадров по ~4 снимка.
+    Звать для снимков ОДНОГО детектора: у разных детекторов сеансы перемежаются.
+    Сеансовые кадры шумнее (меньше снимков), и длина волны точки от сеанса к сеансу чуть разная
+    (фильтр SPHEREx переменный). Сдвиг за дни заметен только у быстрых объектов (астероиды, кометы);
+    для звёзд с собственным движением нужны проходы.
+    """
+    times = np.asarray(times, float)
+    passes = split_epochs(times)
+    if cadence != "visit" or len(times) == 0:
+        return passes
+    labels = np.empty(len(times), int)
+    nxt = -1
+    for ep in np.unique(passes):            # номера проходов растут со временем
+        idx = np.where(passes == ep)[0]
+        idx = idx[np.argsort(times[idx])]
+        prev = None
+        for i in idx:
+            if prev is None or (times[i] - prev) * 24 > VISIT_GAP_HOURS:
+                nxt += 1
+            labels[i] = nxt
+            prev = times[i]
+    return labels
+
+
+def select_exposures(table, per_group: int | None = None, cadence: str = "pass"):
     """Оставить не больше per_group экспозиций на каждую пару (эпоха, детектор),
     равномерно по времени. Быстрый режим: per_group=3 даёт ~50 вырезок вместо сотен.
 
@@ -56,7 +89,7 @@ def select_exposures(table, per_group: int | None = None):
     """
     if not per_group or len(table) == 0:
         return table
-    labels = split_epochs(table["time"])
+    labels = split_cadence(table["time"], cadence)
     keep = []
     for ep in np.unique(labels):
         for det in np.unique(table["detector"]):
@@ -112,7 +145,7 @@ def stack(cutouts: list[dict], target_wcs: WCS, shape) -> np.ndarray:
 
 def build_frames(cutouts: list[dict], coord: SkyCoord, size_deg: float = 0.1,
                  detectors=None, min_exposures: int = 2,
-                 info: list | None = None) -> list[tuple[str, int, np.ndarray]]:
+                 info: list | None = None, cadence: str = "pass") -> list[tuple[str, int, np.ndarray]]:
     """Список вырезок -> кадры [(дата эпохи 'YYYY-MM-DD', детектор, 2D-массив)].
 
     Один кадр = медиана всех экспозиций данного детектора в данной эпохе.
@@ -127,7 +160,7 @@ def build_frames(cutouts: list[dict], coord: SkyCoord, size_deg: float = 0.1,
     if not cutouts:
         return []
     target_wcs, shape = make_target_wcs(coord, size_deg)
-    labels = split_epochs([c["time"] for c in cutouts])
+    labels = split_cadence([c["time"] for c in cutouts], cadence)
 
     groups = defaultdict(list)
     for c, ep in zip(cutouts, labels):

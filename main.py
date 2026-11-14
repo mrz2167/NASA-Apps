@@ -56,9 +56,16 @@ _LOCK = threading.Lock()
 _MAX_SKIES = 12
 
 
-def _load_sky(ra: float, dec: float, fov: float) -> dict:
-    """Кадры для места: сначала полный набор из кэша на диске, иначе быстрый режим."""
-    key = (round(ra, 4), round(dec, 4), round(fov, 4))
+def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int | None = None) -> dict:
+    """Кадры для места: сначала полный набор из кэша на диске, иначе быстрый режим.
+
+    cadence="visit" — проходы порезаны на сеансы съёмки (epochs.split_cadence); такие кадры собираются
+    только для детектора det: сеансы у каждого детектора свои, и пересобирать все шесть незачем.
+    """
+    if cadence != "visit":
+        cadence, det = "pass", None
+    dets = [det] if det else None
+    key = (round(ra, 4), round(dec, 4), round(fov, 4), cadence, det)
     with _LOCK:
         if key in _SKIES:
             _SKIES.move_to_end(key)
@@ -66,21 +73,22 @@ def _load_sky(ra: float, dec: float, fov: float) -> dict:
     sky = None
     if fov < 0.1:
         try:
-            big = _load_sky(ra, dec, 0.1)
+            big = _load_sky(ra, dec, 0.1, cadence, det)
             return _crop_sky(big, fov)
         except SkyUnavailable:
             pass
     try:
-        full = get_sky(ra, dec, fov, quick=False, offline=True)
-        if full["n_loaded"] >= 0.8 * full["n_found"]:
+        full = get_sky(ra, dec, fov, quick=False, offline=True, detectors=dets, cadence=cadence)
+        if full["n_loaded"] >= 0.8 * full["n_wanted"]:
             sky = full
     except SkyUnavailable:
         pass
     if sky is None:
+        kw = dict(quick=True, detectors=dets, cadence=cadence)
         try:
-            sky = get_sky(ra, dec, fov, quick=True)
+            sky = get_sky(ra, dec, fov, **kw)
         except SkyUnavailable:
-            sky = get_sky(ra, dec, fov, quick=True, offline=True)  # архив лёг — что есть в кэше
+            sky = get_sky(ra, dec, fov, offline=True, **kw)  # архив лёг — что есть в кэше
     with _LOCK:
         _SKIES[key] = sky
         while len(_SKIES) > _MAX_SKIES:
@@ -148,8 +156,8 @@ def _crop_sky(sky: dict, fov: float) -> dict:
 def _sky_containing(ra: float, dec: float) -> dict | None:
     """Уже загруженный набор кадров, в поле которого лежит точка (для клика по объекту)."""
     c = SkyCoord(ra, dec, unit="deg")
-    with _LOCK:
-        skies = list(reversed(_SKIES.values()))
+    with _LOCK:   # только полные наборы: в сеансовых лежит один детектор, спектра из них не собрать
+        skies = [s for s in reversed(_SKIES.values()) if s.get("cadence", "pass") == "pass"]
     for sky in skies:
         x, y = (float(v) for v in sky["wcs"].world_to_pixel(c))
         ny, nx = sky["shape"]
@@ -173,7 +181,9 @@ def _diff_rgb(d: np.ndarray, lim: float) -> np.ndarray:
     return rgb.astype(np.uint8)
 
 
-def _epoch_labels(dates: list[str]) -> list[str]:
+def _epoch_labels(dates: list[str], cadence: str = "pass") -> list[str]:
+    if cadence == "visit":
+        return [f"{d} · Frame {k + 1}" for k, d in enumerate(dates)]
     return [f"{d[:4]} · Epoch {k + 1}" for k, d in enumerate(dates)]
 
 
@@ -243,7 +253,13 @@ def _det_items(sky: dict, detector: int) -> list:
         keep = n >= 0.25 * np.median(n)
         if keep.sum() >= 2:
             items = [it for it, k in zip(items, keep) if k]
+    if len(items) > MAX_FRAMES:   # глубокие поля у полюсов эклиптики дают до сотни сеансов
+        pick = np.linspace(0, len(items) - 1, MAX_FRAMES).round().astype(int)
+        items = [items[k] for k in pick]
     return items
+
+
+MAX_FRAMES = 36   # больше кадров мигать бессмысленно (и PNG-ответ раздувается)
 
 
 def _track(sky: dict, imgs: list, coord: SkyCoord) -> list[dict]:
@@ -259,9 +275,11 @@ def _track(sky: dict, imgs: list, coord: SkyCoord) -> list[dict]:
 
 @app.get("/api/frames")
 def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-           detector: int = Query(4, ge=1, le=6), mode: str = "blink"):
+           detector: int = Query(4, ge=1, le=6), mode: str = "blink",
+           cadence: str = Query("pass", pattern="^(pass|visit)$")):
+    """cadence: "pass" — эпоха раз в полгода; "visit" — каждый проход SPHEREx порезан на сеансы съёмки (дни)."""
     try:
-        sky = _load_sky(ra, dec, fov)
+        sky = _load_sky(ra, dec, fov, cadence, detector)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
 
@@ -272,7 +290,7 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
     dates = [f[0] for _, f in items]
     shown = [fill_saturated(im) for im in imgs]
     lo, hi = stretch_limits(shown)
-    labels = _epoch_labels(dates)
+    labels = _epoch_labels(dates, cadence)
     out_frames = [{"label": lab, "date": d, "png": _png_uri(to_uint8(im, lo, hi))}
                   for lab, d, im in zip(labels, dates, shown)]
 
@@ -287,8 +305,9 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
     # объект в центре: положение на каждом кадре
     positions = _track(sky, imgs, sky["coord"])
 
-    try:
-        a = _analysis(sky, sky["coord"])
+    try:   # химия и движение — по полному набору (все детекторы, полугодовые эпохи)
+        base = sky if cadence == "pass" else _load_sky(ra, dec, fov)
+        a = _analysis(base, base["coord"])
         molecules = a["scores"] or None
     except Exception:
         molecules = None
@@ -301,20 +320,22 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
         "sources": _sources(imgs[-1], sky=sky),
         "target": {"positions": positions, "molecules": molecules},
         "meta": {"source": sky["source"], "n_images": sky["n_loaded"], "warnings": sky["warnings"],
-                 "wavelength_um": [info[i]["wavelength_um"] for i, _ in items] if info else None},
+                 "wavelength_um": [info[i]["wavelength_um"] for i, _ in items] if info else None,
+                 "n_exposures": [info[i]["n_exposures"] for i, _ in items] if info else None,
+                 "cadence": cadence},
     })
 
 
 @app.get("/api/track")
 def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-          detector: int = Query(4, ge=1, le=6)):
+          detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$")):
     """Путь выбранного объекта по кадрам поля (fra, fdec, fov, detector) — для «Trail» и линз.
 
     ra, dec — куда кликнули; клик притягивается к ближайшему источнику.
     positions идут в том же порядке, что frames в /api/frames с теми же параметрами.
     """
     try:
-        sky = _load_sky(fra, fdec, fov)
+        sky = _load_sky(fra, fdec, fov, cadence, detector)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
     coord = _snap(sky, SkyCoord(ra, dec, unit="deg"))
