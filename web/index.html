@@ -1077,7 +1077,7 @@ const api = {
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}, 20000); },
+  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f){ return this.get("/api/lens",{ra:f.ra,dec:f.dec,fov:f.fov}); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}); }
