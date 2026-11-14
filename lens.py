@@ -14,8 +14,8 @@
 континууме хватает снимков и рядом нет пересвеченной звезды; в остальных пикселях NaN. Это признак,
 а не доказательство: на краях ярких звёзд и у быстро движущихся объектов (снимки разных лет видят
 их в разных местах) бывают ложные пятна; карта сглаживается окном 3×3 пикселя (≈ размер звезды).
-Очень холодные объекты (WISE 0855) в коротком окне континуума почти не видны, и для них карта
-пустая — линза на сайте тогда опирается на спектр объекта из карточки.
+Очень тусклые объекты (WISE 0855: континуум ~5σ) по пикселям не измерить; их пятно закрашивает
+paint_object по индексам спектра всего объекта (те же числа, что в карточке).
 """
 from __future__ import annotations
 
@@ -124,3 +124,22 @@ def molecule_maps(sky: dict) -> dict[str, np.ndarray]:
             depth = depth - np.median(depth[ok])
         out[name] = np.where(ok, np.clip(depth, 0.0, 1.0), np.nan).astype(np.float32)
     return out
+
+
+def paint_object(maps: dict[str, np.ndarray], x: float, y: float, scores: dict[str, float],
+                 radius_px: float = 2.2) -> dict[str, np.ndarray]:
+    """Закрасить пятно объекта (кружок radius_px вокруг пикселя x, y сетки) по индексам его спектра.
+
+    Для тусклых объектов (WISE 0855: континуум ~5σ) глубина по отдельному пикселю — шум, а спектр
+    по апертуре вокруг всего объекта (spectrum.get_spectrum -> карточка) надёжнее. Закрашиваются
+    только пиксели, где своей карты нет (NaN): измеренное не перекрываем.
+    """
+    shape = next(iter(maps.values())).shape
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    disc = (xx - x) ** 2 + (yy - y) ** 2 <= radius_px ** 2
+    out = {}
+    for k, m in maps.items():
+        v = float(scores.get(k) or 0.0)
+        out[k] = np.where(disc & ~np.isfinite(m), np.float32(np.clip(v, 0, 1)), m) if v > 0 else m
+    return out
+

@@ -347,13 +347,23 @@ def lens(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5)):
     maps — PNG с прозрачностью для наложения; peak — самая глубокая полоса в поле (0..1);
     lit — сколько пикселей заметно светится.
     """
-    from lens import molecule_maps
+    from lens import molecule_maps, paint_object
     try:
         sky = _load_sky(ra, dec, fov)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
     if "_lens" not in sky:   # считается один раз на поле и живёт вместе с ним в кэше _SKIES
         maps = molecule_maps(sky)
+        # объект в центре поля: если он слишком тусклый для попиксельной карты (WISE 0855),
+        # его пятно закрашивается по индексам его спектра — тем же, что в карточке /api/object
+        try:
+            c = _snap(sky, sky["coord"])
+            scores = _analysis(sky, c)["scores"] or {}
+            if any(v > 0 for v in scores.values()):
+                x, y = (float(v) for v in sky["wcs"].world_to_pixel(c))
+                maps = paint_object(maps, x, y, scores)
+        except Exception:
+            pass
         sky["_lens"] = _clean({
             "size_px": int(sky["shape"][0]),
             "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in maps.items()},
