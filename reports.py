@@ -1,16 +1,14 @@
-"""Общая таблица находок (citizen science): отчёты учеников -> таблица для преподавателя.
+"""Находки пользователей: кнопка «Send report» в окне Field report -> запись на нашем сервере.
 
-    POST   /api/reports              отправить отчёт (из окна «Field report» на сайте)
-    GET    /api/reports?class=CODE   отчёты класса (код класса — общий секрет класса)
-    GET    /api/reports?key=KEY      все отчёты (ключ преподавателя, переменная INSTRUCTOR_KEY)
-    GET    /api/reports.csv?…        то же в CSV (для Excel / Google Sheets)
-    DELETE /api/reports/{id}?key=KEY удалить (только с ключом преподавателя)
-    страница /reports                таблица для преподавателя
+    POST   /api/reports              принять отчёт (свободный режим, реальные данные SPHEREx)
+    GET    /api/reports?key=KEY      все отчёты (ключ команды, переменная REPORTS_KEY)
+    GET    /api/reports.csv?key=KEY  то же в CSV (Excel / Google Sheets)
+    DELETE /api/reports/{id}?key=KEY удалить мусорный отчёт
+    страница /reports                таблица для команды (нужен ключ)
 
 Хранилище — SQLite, путь REPORTS_DB (по умолчанию data/reports.db). На Railway файловая система
 сбрасывается при каждом деплое: подключите volume и укажите REPORTS_DB=/data/reports.db.
-
-Имена учеников видны только по коду класса или ключу преподавателя — публичного списка нет.
+Список отчётов закрыт ключом: в отчётах могут быть имена пользователей.
 """
 from __future__ import annotations
 
@@ -22,17 +20,18 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("REPORTS_DB", ROOT / "data" / "reports.db"))
-INSTRUCTOR_KEY = os.environ.get("INSTRUCTOR_KEY", "")
+REPORTS_KEY = os.environ.get("REPORTS_KEY", "")
 MOLECULES = ("water", "methane", "co2", "co")
-SAME_OBJECT_DEG = 3 / 3600          # тот же ученик, тот же объект ближе 3″ — не дублируем
+SAME_OBJECT_DEG = 3 / 3600          # тот же браузер, тот же объект ближе 3″ — не дублируем
 MAX_PER_CLIENT_PER_HOUR = 60
 
 router = APIRouter()
@@ -43,32 +42,24 @@ def _db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=10)
     con.row_factory = sqlite3.Row
-    con.execute("""CREATE TABLE IF NOT EXISTS reports (
+    con.execute("""CREATE TABLE IF NOT EXISTS finds (   -- not "reports": that name had a class-code schema
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         created REAL NOT NULL,
         client TEXT NOT NULL,
-        name TEXT, class_code TEXT,
-        source TEXT NOT NULL,              -- free | level5
+        name TEXT,
         ra REAL, dec REAL, field_ra REAL, field_dec REAL, fov REAL,
         object_name TEXT, status TEXT, verdict TEXT,
         motion REAL, motion_err REAL, pa REAL, catalog_motion REAL,
         variability REAL, molecules TEXT,
-        detector INTEGER, cadence TEXT, note TEXT)""")
-    con.execute("CREATE INDEX IF NOT EXISTS reports_class ON reports(class_code)")
+        detector INTEGER, cadence TEXT)""")
     return con
-
-
-def _clean_code(s: str | None) -> str:
-    return "".join(ch for ch in (s or "").strip().upper() if ch.isalnum() or ch in "-_")[:24]
 
 
 class ReportIn(BaseModel):
     client: str = Field(min_length=6, max_length=64)
     name: str = Field("", max_length=40)
-    class_code: str = Field("", max_length=24)
-    source: str = Field(pattern="^(free|level5)$")
-    ra: float | None = Field(None, ge=0, lt=360)
-    dec: float | None = Field(None, ge=-90, le=90)
+    ra: float = Field(ge=0, lt=360)
+    dec: float = Field(ge=-90, le=90)
     field_ra: float | None = Field(None, ge=0, lt=360)
     field_dec: float | None = Field(None, ge=-90, le=90)
     fov: float | None = Field(None, gt=0, le=1)
@@ -83,7 +74,6 @@ class ReportIn(BaseModel):
     molecules: dict[str, float] = {}
     detector: int | None = Field(None, ge=1, le=6)
     cadence: str | None = Field(None, pattern="^(pass|visit)$")
-    note: str = Field("", max_length=300)
 
     @field_validator("molecules")
     @classmethod
@@ -99,88 +89,75 @@ def _row(r: sqlite3.Row) -> dict:
     return d
 
 
-def _is_instructor(key: str | None) -> bool:
-    return bool(INSTRUCTOR_KEY) and bool(key) and hmac.compare_digest(key, INSTRUCTOR_KEY)
+def _require_key(key: str | None) -> None:
+    if not REPORTS_KEY:
+        raise HTTPException(403, "Viewing reports is off: set REPORTS_KEY on the server.")
+    if not key or not hmac.compare_digest(key, REPORTS_KEY):
+        raise HTTPException(401, "Wrong or missing key.")
 
 
 @router.post("/api/reports")
 def create_report(rep: ReportIn):
-    code = _clean_code(rep.class_code)
     now = time.time()
-    with _lock, _db() as con:
-        n = con.execute("SELECT COUNT(*) FROM reports WHERE client=? AND created>?", (rep.client, now - 3600)).fetchone()[0]
+    with _lock, closing(_db()) as con, con:
+        n = con.execute("SELECT COUNT(*) FROM finds WHERE client=? AND created>?", (rep.client, now - 3600)).fetchone()[0]
         if n >= MAX_PER_CLIENT_PER_HOUR:
             raise HTTPException(429, "Too many reports from this browser in the last hour.")
-        if rep.ra is not None and rep.dec is not None:
-            dup = con.execute(
-                "SELECT id FROM reports WHERE client=? AND source=? AND ABS(ra-?)<? AND ABS(dec-?)<?",
-                (rep.client, rep.source, rep.ra, SAME_OBJECT_DEG * 2, rep.dec, SAME_OBJECT_DEG)).fetchone()
-            if dup:   # повторная отправка той же находки: обновляем имя/класс/заметку, номер тот же
-                con.execute("UPDATE reports SET name=?, class_code=?, note=? WHERE id=?",
-                            (rep.name.strip(), code, rep.note.strip(), dup[0]))
-                return {"id": dup[0], "duplicate": True, "class_code": code}
+        dup = con.execute("SELECT id FROM finds WHERE client=? AND ABS(ra-?)<? AND ABS(dec-?)<?",
+                          (rep.client, rep.ra, SAME_OBJECT_DEG * 2, rep.dec, SAME_OBJECT_DEG)).fetchone()
+        if dup:
+            return {"id": dup[0], "duplicate": True}
         cur = con.execute(
-            """INSERT INTO reports (created, client, name, class_code, source, ra, dec, field_ra, field_dec, fov,
-               object_name, status, verdict, motion, motion_err, pa, catalog_motion, variability, molecules,
-               detector, cadence, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (now, rep.client, rep.name.strip(), code, rep.source, rep.ra, rep.dec, rep.field_ra, rep.field_dec,
-             rep.fov, rep.object_name, rep.status, rep.verdict, rep.motion, rep.motion_err, rep.pa,
-             rep.catalog_motion, rep.variability, json.dumps(rep.molecules), rep.detector, rep.cadence,
-             rep.note.strip()))
-        return {"id": cur.lastrowid, "duplicate": False, "class_code": code}
+            """INSERT INTO finds (created, client, name, ra, dec, field_ra, field_dec, fov, object_name, status,
+               verdict, motion, motion_err, pa, catalog_motion, variability, molecules, detector, cadence)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (now, rep.client, rep.name.strip(), rep.ra, rep.dec, rep.field_ra, rep.field_dec, rep.fov,
+             rep.object_name, rep.status, rep.verdict, rep.motion, rep.motion_err, rep.pa, rep.catalog_motion,
+             rep.variability, json.dumps(rep.molecules), rep.detector, rep.cadence))
+        return {"id": cur.lastrowid, "duplicate": False}
 
 
-def _select(class_code: str | None, key: str | None) -> list[dict]:
-    code = _clean_code(class_code)
-    if _is_instructor(key):
-        q, args = ("SELECT * FROM reports WHERE class_code=? ORDER BY created DESC", (code,)) if code \
-            else ("SELECT * FROM reports ORDER BY created DESC", ())
-    elif code:
-        q, args = "SELECT * FROM reports WHERE class_code=? ORDER BY created DESC", (code,)
-    else:
-        raise HTTPException(401, "Enter a class code (or the instructor key) to see reports.")
-    with _db() as con:
-        return [_row(r) for r in con.execute(q + " LIMIT 5000", args)]
+def _all() -> list[dict]:
+    with closing(_db()) as con:
+        return [_row(r) for r in con.execute("SELECT * FROM finds ORDER BY created DESC LIMIT 10000")]
 
 
 @router.get("/api/reports")
-def list_reports(class_code: str | None = Query(None, alias="class"), key: str | None = None):
-    rows = _select(class_code, key)
-    return {"reports": rows, "count": len(rows), "instructor": _is_instructor(key),
+def list_reports(key: str | None = None):
+    _require_key(key)
+    rows = _all()
+    return {"reports": rows, "count": len(rows),
             "persistent_hint": None if os.environ.get("REPORTS_DB") else
             "Reports are stored in data/reports.db inside the app. On Railway, mount a volume and set REPORTS_DB."}
 
 
 @router.get("/api/reports.csv")
-def reports_csv(request: Request, class_code: str | None = Query(None, alias="class"), key: str | None = None):
-    rows = _select(class_code, key)
+def reports_csv(request: Request, key: str | None = None):
+    _require_key(key)
     base = str(request.base_url).rstrip("/")
-    cols = ["id", "created_iso", "name", "class_code", "source", "object_name", "status", "verdict", "ra", "dec",
-            "motion", "motion_err", "pa", "catalog_motion", "variability", *MOLECULES, "detector", "note", "sky_link"]
+    cols = ["id", "created_iso", "name", "object_name", "status", "verdict", "ra", "dec", "motion", "motion_err",
+            "pa", "catalog_motion", "variability", *MOLECULES, "detector", "cadence", "sky_link"]
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
-    for r in rows:
+    for r in _all():
         r.update(r.pop("molecules"))
         if r.get("field_ra") is not None:
             r["sky_link"] = f"{base}/?ra={r['field_ra']:.5f}&dec={r['field_dec']:.5f}&fov={r.get('fov') or 0.1}"
-        # текст учеников не должен стать формулой в Excel/Sheets (=HYPERLINK(…) и т.п.)
-        for k in ("name", "class_code", "object_name", "verdict", "note"):
+        for k in ("name", "object_name", "verdict"):    # текст не должен стать формулой в Excel/Sheets
             v = r.get(k)
             if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
                 r[k] = "'" + v
         w.writerow(r)
-    name = f"lumen-reports-{_clean_code(class_code) or 'all'}.csv"
     return Response(buf.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+                    headers={"Content-Disposition": 'attachment; filename="lumen-reports.csv"'})
 
 
 @router.delete("/api/reports/{rid}")
 def delete_report(rid: int, key: str | None = None):
-    if not _is_instructor(key):
-        raise HTTPException(403, "Only the instructor key can delete reports.")
-    with _lock, _db() as con:
-        n = con.execute("DELETE FROM reports WHERE id=?", (rid,)).rowcount
+    _require_key(key)
+    with _lock, closing(_db()) as con, con:
+        n = con.execute("DELETE FROM finds WHERE id=?", (rid,)).rowcount
     if not n:
         raise HTTPException(404, "No such report.")
     return {"deleted": rid}

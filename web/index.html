@@ -169,7 +169,6 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .plate.is-new{border-color:var(--amber);box-shadow:0 0 0 1px rgba(246,181,68,.35),0 0 30px -8px rgba(246,181,68,.6)}
 .plate .new{display:none;position:absolute;top:-9px;left:10px;font-size:9px;font-weight:700;letter-spacing:.18em;padding:2px 7px;border-radius:999px;background:var(--amber);color:var(--night)}
 .plate.is-new .new{display:block}
-.wise-btn{padding:7px 14px;font-size:12px;text-decoration:none}
 .plate .tip{flex-basis:100%;font-size:12px;color:var(--amber);order:-1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
 .seg button{border:0;background:transparent;color:var(--muted);padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600}
@@ -255,12 +254,7 @@ input[type=range]{accent-color:var(--amber);width:160px}
 .name-in input{background:rgba(243,238,228,.06);border:1px solid var(--line);border-radius:10px;padding:11px 12px;outline:none}
 .name-in input:focus{border-color:var(--amber)}
 .name-in .label{font-size:10px;color:var(--muted)}
-.send{margin-top:16px;padding:14px 16px;border:1px solid rgba(246,181,68,.35);border-radius:var(--radius);background:rgba(246,181,68,.05)}
-.send-hint{font-size:13px;margin:4px 0 6px}
-.send-row{display:flex;flex-wrap:wrap;gap:0 12px}
-.send-row .name-in{flex:1 1 160px}
-.send-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.send-status{font-size:13px;color:var(--muted)}
+.send-status{font-size:13px;color:var(--muted);margin-top:12px}
 .send-status.ok{color:var(--amber)}
 .toasts{position:fixed;right:18px;bottom:18px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px}
 .toast{background:var(--paper);color:var(--ink);border-radius:12px;padding:12px 14px;font-size:13px;box-shadow:0 14px 40px -10px rgba(0,0,0,.6);animation:in .35s ease}
@@ -421,11 +415,6 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <div class="seg" id="detSeg"></div>
             <span class="det-hint" id="detHint"></span>
           </div>
-          <div class="plate" data-tool="wise">
-            <span class="label ctl-label">Older sky</span>
-            <a class="btn btn-ghost wise-btn" id="wiseLink" href="http://byw.tools/wiseview" target="_blank" rel="noopener">Open in WiseView ↗</a>
-            <span class="det-hint">WISE 2010–2024: 14 more years of motion</span>
-          </div>
         </div>
         <div class="simnote" id="simNote" hidden></div>
       </section>
@@ -479,19 +468,11 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
   <div class="modal-card">
     <div class="label" style="color:var(--amber)">Field report</div>
     <div class="display">File what you found.</div>
-    <p>A card for your channel, and a link that opens this exact patch of sky. Signs, not proof — and that's how real discoveries start.</p>
+    <p>Send it to the LUMEN team, download the card, or copy a link that opens this exact patch of sky. Signs, not proof — and that's how real discoveries start.</p>
     <img id="reportImg" class="report-preview" alt="Field report card">
-    <div class="send" id="sendBox" hidden>
-      <div class="label" style="color:var(--amber)">Send to your class</div>
-      <p class="send-hint">Your teacher sees every report from your class in one table: who found what, and where.</p>
-      <div class="send-row">
-        <label class="name-in"><span class="label">Your name</span><input id="repName" maxlength="40" placeholder="First name is enough"></label>
-        <label class="name-in"><span class="label">Class code</span><input id="repClass" maxlength="24" placeholder="From your teacher"></label>
-      </div>
-      <label class="name-in"><span class="label">Note (optional)</span><input id="repNote" maxlength="300" placeholder="What did you notice?"></label>
-      <div class="send-actions"><button class="btn btn-amber" id="sendReport">Send to class</button><span class="send-status" id="sendStatus" role="status"></span></div>
-    </div>
+    <p class="send-status" id="sendStatus" role="status" hidden></p>
     <div class="modal-actions">
+      <button class="btn btn-amber" id="sendReport" hidden>Send report</button>
       <button class="btn btn-primary" id="dlReport">Download card</button>
       <button class="btn btn-ghost" id="copyLink">Copy sky link</button>
       <button class="btn btn-ghost" data-close>Close</button>
@@ -564,7 +545,7 @@ const TARGETS = {
 
 /* ---------- the 10 levels ---------- */
 const TOOL_ORDER = ["play","mode","epoch","lens","who"];
-const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det","wise"];
+const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det"];
 
 const LEVELS = [
   {n:1, title:"The Power of the Blink",
@@ -1210,21 +1191,6 @@ const api = {
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence,source:S.survey,frame:S.epoch}); }
 };
-// WiseView (byw.tools, AMNH): the same spot in WISE/NEOWISE images, 2010–2024. Centred on the clicked
-// object if there is one, otherwise on the field; settings as WiseView's own defaults (W2, inverted).
-function wiseviewUrl(){
-  const f=S.field; if(!f) return "http://byw.tools/wiseview";
-  const o=S.track ? {ra:S.track.ra, dec:S.track.dec} : (S.selSky || {ra:f.ra, dec:f.dec});
-  const size = S.track || S.selSky ? 176 : Math.min(600, Math.round(f.fov*3600));
-  return "http://byw.tools/wiseview#ra="+o.ra.toFixed(6)+"&dec="+o.dec.toFixed(6)+"&size="+size+
-    "&band=2&speed=698.16&minbright=2.2488&maxbright=500.0000&window=1.06038&diff_window=1&linear=1&color=&zoom=7"+
-    "&border=0&gaia=0&invert=1&maxdyr=0&scandir=0&neowise=0&diff=0&outer_epochs=0&unique_window=1&smooth_scan=0"+
-    "&shift=0&pmra=0&pmdec=0&synth_a=0&synth_b=0";
-}
-$("wiseLink").addEventListener("click", e=>{
-  if(!S.field){ e.preventDefault(); return toast("No sky yet","Open a patch of sky first."); }
-  e.currentTarget.href=wiseviewUrl();
-});
 $("surpriseBig").onclick=()=>surprise();
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
 
@@ -1569,7 +1535,7 @@ canvas.addEventListener("click", async e=>{
     if(pick==="target") S.trackReq=(S.trackReq||0)+1;
     else followTrack(S.field.ra+dra, S.field.dec+ddec);
     draw();
-    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // for the WiseView link
+    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // clicked position (field reports)
     fileStatus("Checking…", "Looking up how it moves, how it flickers and what it's made of.", true);
     // the first click on a new patch of sky reads every exposure there: say so instead of looking stuck
     const slow=setTimeout(()=>{ if(click===S.clickId) fileStatus("Calculating spectrum…", "First look at this patch of sky: we're reading every SPHEREx exposure of it. This can take up to a minute.", true); }, 6000);
@@ -1685,14 +1651,11 @@ async function openReport(o){
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;
   $("copyLink").hidden = !!train;
-  // shared class table: candidates from free exploration and from Level 5 (needs the real backend)
+  // real finds go to our server (free exploration on real SPHEREx data; training levels are simulated)
   S.reportObj=o;
-  const canSend = !!CONFIG.API_BASE && (S.ctx==="free" || (S.ctx==="training" && S.level===5));
-  $("sendBox").hidden=!canSend;
-  if(canSend){
-    $("repName").value=P.name||""; $("repClass").value=P.classCode||""; $("repNote").value="";
-    $("sendStatus").textContent=""; $("sendStatus").className="send-status"; $("sendReport").disabled=false;
-  }
+  const canSend = !!CONFIG.API_BASE && S.ctx==="free" && !!S.apiFrames;
+  $("sendReport").hidden=!canSend; $("sendReport").disabled=false; $("sendReport").textContent="Send report";
+  $("sendStatus").hidden=true;
   $("reportModal").classList.add("on");
   if(S.ctx==="training" && S.level===5){
     if(S.tr.marked){ S.tr.reported=true; renderChecklist(); checkL5(); }
@@ -1700,30 +1663,25 @@ async function openReport(o){
   }
 }
 $("sendReport").onclick=async()=>{
-  const o=S.reportObj; if(!o) return;
-  const name=$("repName").value.trim(), code=$("repClass").value.trim();
-  if(!name) { $("repName").focus(); return setSend("Type your name so your teacher knows who found it."); }
-  if(!code) { $("repClass").focus(); return setSend("Type the class code your teacher gave you."); }
-  P.name=name; P.classCode=code; if(!P.client) P.client=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()); save();
-  const train=S.ctx==="training", f=S.field, at=S.track ? {ra:S.track.ra, dec:S.track.dec} : S.selSky;
-  const m=o.motion||{};
-  const body={client:P.client, name, class_code:code, source:train?"level5":"free",
-    ra:train?null:at?.ra??null, dec:train?null:at?.dec??null,
-    field_ra:train?null:f?.ra??null, field_dec:train?null:f?.dec??null, fov:train?null:f?.fov??null,
-    object_name:o.name||(train?"Training candidate":null), status:["known","candidate","star"].includes(o.status)?o.status:"candidate",
+  const o=S.reportObj, f=S.field; if(!o || !f) return;
+  if(!P.client){ P.client=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()); save(); }
+  const at=S.track ? {ra:S.track.ra, dec:S.track.dec} : (S.selSky || {ra:f.ra, dec:f.dec}), m=o.motion||{};
+  const body={client:P.client, name:(P.name||"").trim(),
+    ra:((at.ra%360)+360)%360, dec:at.dec, field_ra:f.ra, field_dec:f.dec, fov:f.fov,
+    object_name:o.name||null, status:["known","candidate","star"].includes(o.status)?o.status:"candidate",
     verdict:verdict(o)[0], motion:m.arcsec_per_yr??null, motion_err:m.arcsec_per_yr_err??null, pa:m.pa_deg??null,
     catalog_motion:m.catalog_arcsec_per_yr??null, variability:o.variability?.ratio??null, molecules:o.molecules||{},
-    detector:train?null:S.det, cadence:train?null:S.cadence, note:$("repNote").value.trim()};
-  if(body.ra!=null) body.ra=((body.ra%360)+360)%360;
+    detector:S.det, cadence:S.cadence};
   $("sendReport").disabled=true; setSend("Sending…");
   try{
     const r=await fetch(CONFIG.API_BASE+"/api/reports",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(typeof d.detail==="string"?d.detail:"error "+r.status);
-    setSend(d.duplicate?`Already in class ${d.class_code}'s table (report #${d.id}). Name and note updated.`:`Sent ✓ Report #${d.id} is in class ${d.class_code}'s table.`, true);
+    $("sendReport").textContent="Sent ✓";
+    setSend(d.duplicate?`Already received as report #${d.id}. Thanks!`:`Received ✓ Report #${d.id} is saved. Thanks for looking!`, true);
   }catch(e){ $("sendReport").disabled=false; setSend("Couldn't send: "+e.message); }
 };
-function setSend(t, ok=false){ $("sendStatus").textContent=t; $("sendStatus").className="send-status"+(ok?" ok":""); }
+function setSend(t, ok=false){ const e=$("sendStatus"); e.hidden=false; e.textContent=t; e.className="send-status"+(ok?" ok":""); }
 $("dlReport").onclick=()=>{ const a=document.createElement("a"); a.href=S.reportUrl; a.download="lumen-field-report.png"; a.click(); };
 $("copyLink").onclick=async()=>{ try{ await navigator.clipboard.writeText(location.href); toast("Link copied","Anyone who opens it lands on this exact patch of sky."); }catch(e){ toast("Copy this link", location.href); } };
 
