@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LUMEN · Class discoveries</title>
+<title>LUMEN · Discoveries</title>
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -55,7 +55,6 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .badge.candidate{background:var(--red);color:var(--paper)}
 .badge.known{background:rgba(246,181,68,.18);color:var(--amber)}
 .badge.star{background:rgba(243,238,228,.1);color:var(--muted)}
-.badge.training{background:rgba(61,91,217,.25);color:#AFC0FF;margin-top:4px}
 .chem span{display:inline-block;margin-right:6px;white-space:nowrap}
 .links a{display:block;white-space:nowrap}
 .del{background:none;border:0;color:var(--faint);font-size:12px;padding:0}
@@ -71,23 +70,22 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     <a class="btn btn-ghost" href="/">← Back to the sky</a>
   </header>
 
-  <h1 class="display">Class discoveries</h1>
-  <p class="sub">Every field report your students send lands here: who found it, what it is, how it moves and what it's made of. Candidates are objects no catalogue matched. Check them in SIMBAD or WiseView before calling them new.</p>
+  <h1 class="display">Discoveries</h1>
+  <p class="sub">Every field report sent from the site lands here: what was found, where, how it moves and what it's made of. Candidates are objects no catalogue matched. Check them in SIMBAD before calling them new.</p>
 
   <form id="f" autocomplete="off">
-    <label class="field"><span class="label">Class code</span><input id="code" maxlength="24" placeholder="e.g. 9B-ASTRO"></label>
-    <label class="field"><span class="label">Instructor key (optional)</span><input id="key" type="password" maxlength="80" placeholder="All classes + delete"></label>
+    <label class="field"><span class="label">Team key</span><input id="key" type="password" maxlength="80" placeholder="REPORTS_KEY from the server"></label>
     <label class="field" style="flex:0 1 180px"><span class="label">Show</span>
-      <select id="show"><option value="all">All reports</option><option value="candidate">Candidates only</option><option value="free">Free exploration only</option></select></label>
+      <select id="show"><option value="all">All reports</option><option value="candidate">Candidates only</option></select></label>
     <button class="btn btn-amber" type="submit">Show reports</button>
   </form>
 
-  <div class="msg" id="msg">Enter the class code you gave your students. Reports only appear for the code they typed.</div>
+  <div class="msg" id="msg">Enter the team key to see the reports.</div>
 
   <div id="out" hidden>
     <div class="stats">
       <div class="stat"><span class="label">Reports</span><b id="sN">0</b></div>
-      <div class="stat"><span class="label">Students</span><b id="sS">0</b></div>
+      <div class="stat"><span class="label">People</span><b id="sS">0</b></div>
       <div class="stat"><span class="label">Candidates</span><b id="sC">0</b></div>
       <div class="stat"><span class="label">With molecule signs</span><b id="sM">0</b></div>
     </div>
@@ -97,7 +95,7 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>When</th><th>Student</th><th>Object</th><th>Status</th><th>Motion</th><th>Chemistry</th><th>Where</th><th></th></tr></thead>
+        <thead><tr><th>When</th><th>Sent by</th><th>Object</th><th>Status</th><th>Motion</th><th>Chemistry</th><th>Where</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -108,16 +106,12 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const SIGN=0.2, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
-const mem={ get(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
 let data=null, timer=null;
 
-function params(){
-  const p=new URLSearchParams(); const c=$("code").value.trim(), k=$("key").value.trim();
-  if(c) p.set("class",c); if(k) p.set("key",k); return p;
-}
+function params(){ const p=new URLSearchParams(); p.set("key",$("key").value.trim()); return p; }
 async function load(){
   const p=params();
-  if(!p.has("class") && !p.has("key")){ $("msg").textContent="Enter the class code you gave your students."; $("msg").hidden=false; return; }
+  if(!p.get("key")){ $("msg").textContent="Enter the team key to see the reports."; $("msg").hidden=false; return; }
   try{
     const r=await fetch("/api/reports?"+p); const d=await r.json();
     if(!r.ok) throw new Error(d.detail||r.status);
@@ -129,33 +123,31 @@ function render(){
   const show=$("show").value;
   let rows=data.reports;
   if(show==="candidate") rows=rows.filter(r=>r.status==="candidate");
-  if(show==="free") rows=rows.filter(r=>r.source==="free");
   const all=data.reports;
   $("sN").textContent=all.length;
   $("sS").textContent=new Set(all.map(r=>(r.name||"").trim().toLowerCase()).filter(Boolean)).size;
-  $("sC").textContent=all.filter(r=>r.status==="candidate" && r.source==="free").length;
+  $("sC").textContent=all.filter(r=>r.status==="candidate").length;
   $("sM").textContent=all.filter(r=>Object.values(r.molecules||{}).some(v=>v>=SIGN)).length;
   $("out").hidden=false;
-  const hint=data.persistent_hint && data.instructor ? " ⚠ "+data.persistent_hint : "";
+  const hint=data.persistent_hint ? " ⚠ "+data.persistent_hint : "";
   $("msg").className="msg"+(hint?" warn":""); $("msg").hidden=!hint; $("msg").textContent=hint.trim();
-  if(!rows.length){ $("rows").innerHTML=`<tr><td colspan="8" class="empty">No reports yet${$("code").value?` for class ${esc($("code").value.trim().toUpperCase())}`:""}. They appear here as soon as a student taps “Send to class”.</td></tr>`; return; }
+  if(!rows.length){ $("rows").innerHTML=`<tr><td colspan="8" class="empty">No reports yet. They appear here as soon as someone taps “Send report” on the site.</td></tr>`; return; }
   $("rows").innerHTML=rows.map(r=>{
     const chem=Object.keys(MOL).filter(k=>(r.molecules?.[k]||0)>=SIGN).map(k=>`<span>${MOL[k]} ${r.molecules[k].toFixed(2)}</span>`).join("")||`<span style="color:var(--faint)">none</span>`;
     const mv=r.motion!=null?`${r.motion.toFixed(2)}″/yr${r.motion_err!=null?` <small style="color:var(--faint)">±${r.motion_err.toFixed(2)}</small>`:""}`:"—";
     const cat=r.catalog_motion!=null?`<br><small style="color:var(--faint)">catalogue ${r.catalog_motion.toFixed(2)}″/yr</small>`:"";
     const links = r.ra!=null ? `<a href="/?ra=${r.field_ra??r.ra}&dec=${r.field_dec??r.dec}&fov=${r.fov||0.1}" target="_blank" rel="noopener">Open in LUMEN</a>
-      <a href="http://byw.tools/wiseview#ra=${r.ra}&dec=${r.dec}&size=176&band=2&invert=1" target="_blank" rel="noopener">WiseView</a>
       <a href="https://simbad.harvard.edu/simbad/sim-coo?Coord=${r.ra}%20${r.dec}&Radius=15&Radius.unit=arcsec" target="_blank" rel="noopener">SIMBAD</a>
-      <small style="color:var(--faint)">${r.ra.toFixed(4)}°, ${r.dec>=0?"+":""}${r.dec.toFixed(4)}°</small>` : `<small style="color:var(--faint)">training field</small>`;
+      <small style="color:var(--faint)">${r.ra.toFixed(4)}°, ${r.dec>=0?"+":""}${r.dec.toFixed(4)}°</small>` : "—";
     return `<tr>
       <td class="num">${esc(r.created_iso)}</td>
-      <td class="who"><b>${esc(r.name||"Anonymous")}</b><small>${esc(r.class_code||"no class")}</small></td>
-      <td class="what"><b>${esc(r.object_name||"Unidentified object")}</b><br><small>${esc(r.verdict||"")}</small>${r.note?`<br><small>“${esc(r.note)}”</small>`:""}</td>
-      <td><span class="badge ${esc(r.status)}">${{candidate:"CANDIDATE",known:"KNOWN",star:"STAR"}[r.status]||esc(r.status)}</span>${r.source==="level5"?`<br><span class="badge training">LEVEL 5 · TRAINING</span>`:""}</td>
+      <td class="who"><b>${esc(r.name||"Anonymous")}</b></td>
+      <td class="what"><b>${esc(r.object_name||"Unidentified object")}</b><br><small>${esc(r.verdict||"")}</small></td>
+      <td><span class="badge ${esc(r.status)}">${{candidate:"CANDIDATE",known:"KNOWN",star:"STAR"}[r.status]||esc(r.status)}</span></td>
       <td class="num">${mv}${cat}</td>
       <td class="chem">${chem}</td>
       <td class="links">${links}</td>
-      <td>${data.instructor?`<button class="del" data-id="${r.id}" title="Delete this report">Delete</button>`:""}</td>
+      <td><button class="del" data-id="${r.id}" title="Delete this report">Delete</button></td>
     </tr>`; }).join("");
   document.querySelectorAll(".del").forEach(b=>b.onclick=async()=>{
     if(!confirm("Delete report #"+b.dataset.id+"? This can't be undone.")) return;
@@ -163,11 +155,9 @@ function render(){
     if(r.ok) load(); else alert("Couldn't delete ("+r.status+")");
   });
 }
-$("f").onsubmit=e=>{ e.preventDefault(); mem.set("lumen-class",$("code").value.trim()); load(); clearInterval(timer); timer=setInterval(load,30000); };
+$("f").onsubmit=e=>{ e.preventDefault(); load(); clearInterval(timer); timer=setInterval(load,30000); };
 $("show").onchange=()=>{ if(data) render(); };
-const q=new URLSearchParams(location.search);
-$("code").value=q.get("class")||mem.get("lumen-class");
-if($("code").value){ load(); timer=setInterval(load,30000); }
+
 </script>
 </body>
 </html>
