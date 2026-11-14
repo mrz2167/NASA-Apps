@@ -407,6 +407,7 @@ def health():
     body = {"ok": not problems, "problems": problems, "cached_fields": len(_SKIES), "warm": dict(_WARM),
             "disk": disk, "reports_db": reports_ok, "wise": _wise_mod.status(),
             "archive": __import__("data").archive_status()}   # irsa ok/down; is our own AWS index taking over
+    body["cleanup"] = cleanup.status()     # old visitor fields freed when the disk runs low (cleanup.py)
     # 503 — чтобы внешний монитор (UptimeRobot) прислал тревогу; WISE — сторонний сервис, он только предупреждение
     return body if not problems else JSONResponse(body, status_code=503)
 
@@ -1018,3 +1019,21 @@ def nearest(ra: RA, dec: DEC, n: Annotated[int, Query(ge=1, le=10, description="
 def _start_warm() -> None:
     if os.environ.get("SKYWATCH_WARM", "1") != "0":
         threading.Thread(target=_warm, name="warm", daemon=True).start()
+
+
+# ---------- cleanup of old visitor fields (cleanup.py) ----------
+# Protected from deletion: every UPPERCASE list of (name, ra, dec) in this file (WARM_FIELDS and any list
+# added later), the "Surprise me" fields, seed/queries. _load_sky is wrapped so each served field gets a
+# "last opened" record. The job itself runs in its own thread and only acts when the disk is nearly full.
+import sys as _sys      # noqa: E402
+import cleanup          # noqa: E402
+
+cleanup.protect("main.py lists", _sys.modules[__name__], required=True)
+cleanup.protect("surprise", _surprise_fields, required=True)
+_load_sky = cleanup.track(_load_sky)
+
+
+@app.on_event("startup")
+def _start_cleanup() -> None:
+    cleanup.start()
+# ---------- end of cleanup hook ----------

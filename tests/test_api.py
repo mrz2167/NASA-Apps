@@ -63,7 +63,7 @@ def _report(**kw):
 
 def test_health(base):
     h = requests.get(base + "/api/health").json()
-    assert h["ok"] is True and h["reports_db"] is True and "wise" in h
+    assert h["ok"] is True and h["reports_db"] is True and "wise" in h and "cleanup" in h
 
 
 def test_pages_served(base):
