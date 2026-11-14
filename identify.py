@@ -434,8 +434,13 @@ def _deadline(fn, timeout: float = CATALOG_TIMEOUT_S):
         raise TimeoutError(f"catalogue did not answer within {timeout:.0f} s") from None
 
 
-def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True) -> dict:
-    """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3."""
+def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True, gaia: bool = True) -> dict:
+    """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3.
+
+    gaia=False — skip the Gaia cone (it goes through IRSA: when IRSA is down that is 15 s of waiting for nothing).
+    If nothing was found and SIMBAD did not answer, the result carries "unavailable": True — "we could not
+    ask", which is not the same as "not in the catalogues".
+    """
     info = {"found": False, "name": "Unknown object", "otype": "", "source": None,
             "simbad_url": _simbad_link(coord, radius_arcsec), "pm_arcsec_yr": None, "catalog_id": None}
 
@@ -466,14 +471,17 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
                         otype=str(r0[cols["otype"]]).strip() if "otype" in cols else "", source="SIMBAD")
             return info
     except Exception:
-        pass
+        info["unavailable"] = True
 
+    if not gaia:
+        return info
     try:
         t = _deadline(lambda: gaia_cone(coord, radius_arcsec, top=1))
         if t is not None and len(t):
             m = match_gaia(coord, t, radius_arcsec)
             if m:
                 info.update(m)
+                info.pop("unavailable", None)
     except Exception:
         pass
     return info
