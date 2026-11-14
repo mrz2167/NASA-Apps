@@ -1207,7 +1207,7 @@ const api = {
     catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
     finally{ if(tm) clearTimeout(tm); }
   },
-  frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 60000); },   // cold fields take 15–22 s
+  frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 180000); },   // cold fields take 15–90 s (right after a deploy the cache is empty)
   object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
