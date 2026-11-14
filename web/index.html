@@ -147,6 +147,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .hud.top{top:10px}.hud.bottom{bottom:10px}
 .hud .hot{color:var(--amber)}
 .lens-note{position:absolute;left:12px;top:32px;max-width:calc(100% - 24px);pointer-events:none;font-size:12px;font-weight:600;line-height:1.3;padding:4px 8px;border-radius:6px;background:rgba(7,10,32,.72);color:var(--paper)}
+@media (max-width:520px){.lens-note{top:48px;font-size:11px}}   /* the top HUD wraps to two lines on phones */
 .scalebar{display:flex;align-items:center;gap:6px}
 .scalebar i{display:block;height:2px;background:var(--paper)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;color:var(--muted)}
@@ -1092,12 +1093,13 @@ function draw(){
   if(S.apiFrames){
     const fr = S.mode==="diff" && S.apiFrames.diff ? S.apiFrames.diff[S.epoch] : S.apiFrames.frames[S.epoch];
     if(fr && fr.img) ctx.drawImage(fr.img, v.sx*fr.img.width/N, v.sy*fr.img.height/N, v.sw*fr.img.width/N, v.sw*fr.img.height/N, 0,0,W,W);
-    // molecule lens: dim the sky a little and paint where the light dips in that molecule's band
-    const lm = S.lens!=="none" && S.mode!=="diff" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
-    if(lm){
+    // molecule lens: dim the sky a little and paint where the light dips in that molecule's band.
+    // In "What changed" the diff colours carry the story, so the map goes on as an outline + light tint.
+    const lm = S.lens!=="none" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
+    if(lm && S.mode!=="diff"){
       ctx.fillStyle="rgba(7,10,32,.45)"; ctx.fillRect(0,0,W,W);
       ctx.drawImage(lm, v.sx*lm.width/N, v.sy*lm.height/N, v.sw*lm.width/N, v.sw*lm.height/N, 0,0,W,W);
-    }
+    } else if(lm) drawLensOutline(lm, N);
   } else {
     if(off.width!==N){ off.width=N; off.height=N; }
     const id=octx.createImageData(N,N), cur=S.frames[S.epoch], ref=S.frames[0];
@@ -1118,6 +1120,33 @@ function draw(){
   drawOverlays();
   updateHud();
 }
+// Lens map as pixel-edge outlines (for "What changed"): edges of the lit pixels, cached per map image.
+function lensEdges(img){
+  if(img._edges) return img._edges;
+  const w=img.width, h=img.height, c=document.createElement("canvas"); c.width=w; c.height=h;
+  const g=c.getContext("2d"); g.drawImage(img,0,0); const a=g.getImageData(0,0,w,h).data;
+  const on=(x,y)=>x>=0&&y>=0&&x<w&&y<h&&a[(y*w+x)*4+3]>40;   // alpha 40 ≈ band depth 0.14
+  const segs=[], cells=[];
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    if(!on(x,y)) continue;
+    cells.push([x,y,a[(y*w+x)*4+3]/255]);
+    if(!on(x,y-1)) segs.push([x,y,x+1,y]);
+    if(!on(x,y+1)) segs.push([x,y+1,x+1,y+1]);
+    if(!on(x-1,y)) segs.push([x,y,x,y+1]);
+    if(!on(x+1,y)) segs.push([x+1,y,x+1,y+1]);
+  }
+  return img._edges={segs, cells, w};
+}
+function drawLensOutline(img, N){
+  const e=lensEdges(img), k=N/e.w, col=MOLS[S.lens].color, px=canvas.width/view().sw;
+  ctx.save();
+  for(const [x,y,al] of e.cells){ const p=toCanvas(x*k,y*k); ctx.globalAlpha=.22*al; ctx.fillStyle=col; ctx.fillRect(p.x,p.y,px*k+.5,px*k+.5); }
+  ctx.globalAlpha=1; ctx.lineCap="round";
+  const path=()=>{ ctx.beginPath(); for(const [x1,y1,x2,y2] of e.segs){ const a=toCanvas(x1*k,y1*k), b=toCanvas(x2*k,y2*k); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); } };
+  path(); ctx.strokeStyle="rgba(7,10,32,.9)"; ctx.lineWidth=5; ctx.stroke();   // dark halo keeps it readable over red/blue
+  path(); ctx.strokeStyle=col; ctx.lineWidth=2.4; ctx.stroke();
+  ctx.restore();
+}
 function drawOverlays(){
   const f=S.field, W=canvas.width, px=W/view().sw;
   if(S.hintQuad && f.target){
@@ -1129,8 +1158,7 @@ function drawOverlays(){
     let msg="", col="";
     if(S.lens!=="none" && S.apiFrames){
       const sym=MOLS[S.lens].sym, lm=S.lensMaps?.field===f ? S.lensMaps : null;
-      if(S.mode==="diff") msg=`${sym} map: switch to Blink to see it`;
-      else if(lm && lm.lit[S.lens]>0){ msg=`Coloured where the light dips in the ${sym} band`; col=MOLS[S.lens].color; }
+      if(lm && lm.lit[S.lens]>0){ msg = S.mode==="diff" ? `Outlined where the light dips in the ${sym} band` : `Coloured where the light dips in the ${sym} band`; col=MOLS[S.lens].color; }
       else if(lm) msg=`No ${sym} signs in this field`;
       else if(S.lensLoading===f) msg=`Reading the spectra for the ${sym} map…`;
     }
@@ -1149,7 +1177,7 @@ function drawOverlays(){
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,px*4.5*cl,0,7); ctx.fill();
       ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       label(`${MOLS[S.lens].sym} SIGN ${sc.toFixed(2)}`, p.x+px*3, p.y-px*3, col);
-    } else if(!(S.lensMaps?.field===f && S.mode!=="diff")){   // with the per-pixel map on, the colours speak for themselves
+    } else if(S.lensMaps?.field!==f){   // with the per-pixel map on (fill or outline), the map speaks for itself
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
       label(checking ? `${MOLS[S.lens].sym} · checking…` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
