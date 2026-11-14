@@ -1189,7 +1189,13 @@ function updateHud(){
   $("frameCap").textContent = lab;
   $("epochIn").max = nE()-1;
   $("hudMode").textContent = {blink:"BLINK",diff:"WHAT CHANGED",trail:"TRAIL"}[S.mode] + (S.lens!=="none"?` · ${MOLS[S.lens].sym} LENS`:"");
-  $("hudDet").innerHTML = S.ctx==="training" ? (S.field.sim||"") .split(" · ")[0] : `Detector ${S.det} · <span style="text-transform:none">${DETECTORS[S.det-1].range}</span>`;
+  // Real data: the wavelength this frame saw the centre at. SPHEREx's filter varies across the detector,
+  // so frames of one detector differ a little in wavelength (a lot between visits) and stars flicker slightly.
+  const meta=S.apiFrames?.meta||{}, wl=meta.wavelength_um?.[S.epoch], nx=meta.n_exposures?.[S.epoch];
+  const narrow=canvas.getBoundingClientRect().width<460, lam=Number.isFinite(wl)?` · <span style="text-transform:none">λ ${wl.toFixed(2)} µm</span>`:"";
+  $("hudDet").innerHTML = S.ctx==="training" ? (S.field.sim||"") .split(" · ")[0]
+    : (narrow && lam ? `D${S.det}` : `Detector ${S.det} · <span style="text-transform:none">${DETECTORS[S.det-1].range}</span>`) + lam;
+  $("frameCap").title = S.ctx!=="training" && (lam || nx) ? [Number.isFinite(wl)?`seen at ${wl.toFixed(2)} µm`:"", nx?`${nx} exposures stacked`:""].filter(Boolean).join(" · ") : "";
   const pxCanvas = canvas.getBoundingClientRect().width / view().sw; const arcsec=30;
   $("scaleI").style.width = Math.max(8, pxCanvas*arcsec/CONFIG.PIX_ARCSEC)+"px"; $("scaleT").textContent=arcsec+"″";
   $("epochIn").value=S.epoch;
@@ -1275,7 +1281,7 @@ async function followTrack(ra, dec){
 // Frames: one per six-month sky pass, or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
 bindSeg("cadSeg","c", async c=>{
   S.cadence=c; track("cadence",{val:c});
-  $("cadHint").textContent = c==="visit" ? "a frame every few days: more frames, a bit noisier" : "one frame per sky pass";
+  $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
   if(!S.apiFrames) return;
   stop(); $("loading").classList.add("on");
   try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); }
