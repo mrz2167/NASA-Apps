@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LUMEN Space Academy</title>
-<meta name="description" content="Complete 10 quests and find your first objects in deep space. Real images from NASA's SPHEREx telescope. No astronomy knowledge needed.">
+<meta name="description" content="Complete 10 quests and find your first objects in deep space. Train on real WISE and SPHEREx images, then solve cases in data from NASA's SPHEREx telescope. No astronomy knowledge needed.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230B1030'/%3E%3Cpath d='M32 8l6.5 17.5L56 32l-17.5 6.5L32 56l-6.5-17.5L8 32l17.5-6.5z' fill='%23F6B544'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Unbounded:wght@200;400;700&display=swap" rel="stylesheet">
@@ -303,12 +304,12 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
       <div>
         <span class="label tag">NASA Space Apps 2026</span>
         <h1 class="display">Complete <b>10 quests</b> and find your first objects in deep space</h1>
-        <p class="sub">Real images from NASA's SPHEREx telescope. No astronomy knowledge needed.</p>
+        <p class="sub">Train, solve cases and explore freely in real images from NASA's SPHEREx and WISE telescopes. No astronomy knowledge needed.</p>
         <div class="cta">
           <button class="btn btn-amber btn-lg" id="startBtn">Start the game</button>
           <button class="btn btn-ghost btn-lg" id="freeBtn">Free exploration</button>
         </div>
-        <div class="gray">Images from NASA's SPHEREx telescope · training takes about 10 minutes</div>
+        <div class="gray">Training takes about 10 minutes · levels 1–4 use real WISE and SPHEREx frames, level 5 a practice sky</div>
       </div>
       <div class="map">
         <div id="mapStar"></div>
@@ -375,6 +376,11 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <div>Enter coordinates, or tap one of the ready-made patches above.</div>
             <button class="btn btn-amber" id="surpriseBig">🎲 Surprise me</button>
           </div>
+          <div class="empty" id="errState" style="display:none">
+            <div class="display">The archive didn't answer.</div>
+            <div id="errText">No frames came back for this patch.</div>
+            <button class="btn btn-amber" id="retryBtn">↻ Try again</button>
+          </div>
           <div class="loading" id="loading">Pulling frames from the archive…</div>
         </div>
 
@@ -407,7 +413,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           </div>
           <div class="plate" data-tool="det" id="cadPlate">
             <span class="label ctl-label">Frames</span>
-            <div class="seg" id="cadSeg"><button data-c="pass" class="on">Every 6 months</button><button data-c="visit">Every visit</button></div>
+            <div class="seg" id="cadSeg"><button data-c="pass" class="on">Every sky pass</button><button data-c="visit">Every visit</button></div>
             <span class="det-hint" id="cadHint">one frame per sky pass</span>
           </div>
           <div class="plate" data-tool="det" id="detPlate">
@@ -553,7 +559,7 @@ const LEVELS = [
    teach:"You'll learn the blink method: stars stay put, nearby objects shift.",
    hint:"Don't stare at one dot. Relax your eyes and let the movement jump out at you.",
    fact:"On 18 February 1930, 24-year-old Clyde Tombaugh was flipping between two photos of the sky taken six days apart when he noticed a jumping dot. It was Pluto. Tombaugh was a farm boy with no university degree.",
-   found:{t:"You found something that moves", x:"What it is, you'll find out in Level 4."}},
+   found:{t:"You found something that moves", x:"It's WISE 0855, the coldest brown dwarf known: about as cold as the North Pole, only 7.4 light-years away. Between these two WISE photos, 2010 and 2024, it crossed almost two arcminutes of sky."}},
   {n:2, title:"False Alarm",
    task:"Two dots are blinking. Only one of them is real. Find it.",
    teach:"You'll learn to tell a real object from a glitch: real ones travel in a straight line, glitches flash once or blink in place.",
@@ -565,13 +571,13 @@ const LEVELS = [
    teach:"You'll learn long-term watching: nearby stars and brown dwarfs drift so slowly that it only shows over years.",
    hint:"Move the Epoch slider to both ends: the oldest and the newest photo.",
    fact:"Luhman 16 is only 6.5 light-years away, yet nobody found it until 2013: it was lost among thousands of Milky Way stars. Astronomer Kevin Luhman spotted it by its motion in images from NASA's WISE telescope.",
-   found:{t:"You found Luhman 16", x:"Two brown dwarfs, the third-closest system to the Sun. It drifts 2.79″ a year: about 7 SPHEREx pixels between 2010 and 2025."}},
+   found:{t:"You found Luhman 16", x:"Two brown dwarfs, the third-closest system to the Sun. It drifts 2.79″ a year: about 14 WISE pixels between 2010 and 2024."}},
   {n:4, title:"Ingredients of Space",
-   task:"Remember the dot from Level 1? Switch the lenses and find out what it's made of.",
+   task:"This young star is still hidden inside the cold cloud it was born in. Switch the lenses and find out what the ice around it is made of.",
    teach:"You'll learn to read what things are made of from their light. A dip in the spectrum is a sign, not proof.",
    hint:"Look at the spectrum: where do the dots drop sharply inside a coloured band?",
    fact:"Helium, the gas in party balloons, was found on the Sun before it was found on Earth. During an eclipse in 1868 astronomers saw a yellow line from an unknown element in the Sun's spectrum. Helium turned up on Earth only 27 years later.",
-   found:{t:"You found 3I/ATLAS", x:"You just studied the interstellar comet 3I/ATLAS, only the third object ever seen arriving from another star system. SPHEREx found a huge cloud of CO₂ around it."}},
+   found:{t:"You found CO₂ ice", x:"CRBR 2422.8-3423 is a newborn star in Ophiuchus, seen through the edge of its own disk. Its light passes through frozen CO₂ and CO: the same ices that later end up in comets and planets. Mapping these ices across the sky is one of SPHEREx's main jobs."}},
   {n:5, title:"Did I Find You First?",
    task:"Two moving objects. Check both: does science already know them?",
    teach:"You'll learn to check a find against the catalogue and file a report. Known objects get a name; unknown ones become candidates.",
@@ -583,7 +589,7 @@ const LEVELS = [
 /* Advanced cases (levels 6–10). Did-you-know texts are drafts — review before submission. */
 const CASES = [
   {id:"c1", level:6, target:"barnard", title:"The Runaway Star",
-   brief:"The fastest-moving star in our sky is crossing it in plain view. Six months between photographs, and it still won't sit still.",
+   brief:"The fastest-moving star in our sky is crossing it in plain view. Photographs taken weeks to months apart, and it still won't sit still.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"play",t:"Pause the blink and watch the star jump",ev:"play"},
           {id:"zoom",t:"Zoom to 4×: the move is only a few pixels",ev:"zoom",val:4},{id:"trail",t:"Switch to Trail to draw its path",ev:"mode",val:"trail"},
           {id:"sel",t:"Click the star to open its file",ev:"selectTarget"}],
@@ -595,13 +601,13 @@ const CASES = [
           {id:"d6",t:"Now Detector 6 (4.42–5.00 µm)",ev:"detector",val:6},{id:"ch4",t:"Turn on the Methane lens",ev:"lens",val:"methane"},
           {id:"sel",t:"Open its file and read the spectrum",ev:"selectTarget"}],
    closing:"Invisible in one colour, bright in another, with a methane dip. That's how cold brown dwarfs give themselves away.",
-   fact:"WISE 0855−0714 is the coldest brown dwarf known, below the freezing point of water. Kevin Luhman, who later found Luhman 16, discovered it in 2014 by its motion in WISE images."},
+   fact:"WISE 0855−0714 is the coldest brown dwarf known, below the freezing point of water. Kevin Luhman discovered it in 2014, a year after finding Luhman 16, by its motion in WISE images."},
   {id:"c3", level:8, target:"epsindib", title:"Twins Too Close To Split",
    brief:"Two brown dwarfs orbit each other far closer than one SPHEREx pixel. You will never see two dots. Prove they're cold anyway.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"zoom",t:"Zoom in as far as you can",ev:"zoom",val:4},
           {id:"sel",t:"Open the object's file",ev:"selectTarget"},{id:"h2o",t:"Check it with the Water lens",ev:"lens",val:"water"}],
    closing:"Some mysteries you solve with chemistry, not eyesight. One dot, two cold worlds.",
-   fact:"Epsilon Indi B was discovered in 2003, about 12 light-years from us. A year later sharper telescopes showed it is really two brown dwarfs orbiting each other."},
+   fact:"Epsilon Indi B was discovered in early 2003, about 12 light-years from us. Later that same year sharper images from ESO's Very Large Telescope showed it is really two brown dwarfs orbiting each other."},
   {id:"c4", level:9, target:"rwaur", title:"The Breathing Star",
    brief:"This one doesn't travel. It flickers — a young star still wrapped in the dust it was born from. Find the change without the motion.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"diff",t:"Switch to What changed",ev:"mode",val:"diff"},
@@ -671,10 +677,15 @@ const SURPRISE_TIP = {
   var:  "It's in the middle. Step through the frames: its brightness changes while its position stays put."
 };
 // Shuffle bag: every field once before any repeats.
+// The server says which fields it has built (/api/surprises); the case targets (with a key) are always ready.
+// Until it answers, or without a server, every field is allowed.
+function refreshSurprises(){ if(!CONFIG.API_BASE) return; api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); }).catch(()=>{}); }
 function surprise(){
   if(S.ctx!=="free") startFree();
   if(!S.surpriseBag || !S.surpriseBag.length){
-    S.surpriseBag = SURPRISES.map((_,i)=>i).sort(()=>Math.random()-.5);
+    const ok = o => o.key || !S.surpriseReady || S.surpriseReady.has(o.name);
+    S.surpriseBag = SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0).sort(()=>Math.random()-.5);
+    refreshSurprises();
     if(S.surpriseBag[0]===S.surpriseLast && S.surpriseBag.length>1) S.surpriseBag.push(S.surpriseBag.shift());
   }
   const i=S.surpriseBag.shift(), o=SURPRISES[i]; S.surpriseLast=i;
@@ -811,7 +822,7 @@ function resetViewerState(){
   stop(); S.epoch=0; S.mode="blink"; S.lens="none"; S.zoom=1; S.selected=null; S.ring=null; S.lastObj=null; S.hintQuad=false;
   const seg=(id,attr,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on", b.dataset[attr]===String(val)));
   seg("modeSeg","m","blink"); seg("lensSeg","l","none"); seg("zoomSeg","z","1");
-  S.scanId=(S.scanId||0)+1; S.apiFrames=null; $("loading").classList.remove("on");
+  S.scanId=(S.scanId||0)+1; S.apiFrames=null; $("loading").classList.remove("on"); $("errState").style.display="none";
   say(""); $("taskExtra").innerHTML=""; $("simNote").hidden=true; $("hintRow").hidden=true; $("hintText").textContent="";
   $("hintBtn").textContent="Need a hint?"; $("hintBtn").hidden=false;
   resetFile(); clearSpectrum();
@@ -828,6 +839,11 @@ function startLevel(n){
                        target:{positions:[{x,y},…]}, stars:[{x,y,f:1,det:[1,1,1,1,1,1]},…]}
    Positions are in grid pixels of a 48×48 field (x right, y down). Without an entry the level runs on the simulation. */
 const TRAINING_DATA = {};
+// Real frames for levels 1–4, cut once by make_training.py (web/levels/training.json). Over file:// or if the
+// file is missing, the levels run on the simulation.
+const TRAINING_READY = (location.protocol.startsWith("http")
+  ? fetch("levels/training.json").then(r=>r.ok?r.json():{}).then(d=>Object.assign(TRAINING_DATA, d)).catch(()=>{})
+  : Promise.resolve());
 
 function makeStars(N, seed, avoid){
   const r=mulberry(seed), stars=[], count=Math.round(N*N*0.016);
@@ -868,14 +884,23 @@ function buildTraining(n){
     extras.push({kind:"candidate", positions:line(36,34,-1.4,-1.1,4), sig:.85, bright:.8, det:FLAT, moving:true});
   }
   const real=TRAINING_DATA[n];
-  if(real){ epochs=real.epochs; target=Object.assign(target, real.target); sim="Real NASA SPHEREx frames"; }
+  let gridN=N, realStars=null;
+  if(real){
+    epochs=real.epochs; target=Object.assign(target, real.target); sim=real.sim||"Real frames";
+    gridN=real.N||N; if(real.extras?.length || n===2) extras=(real.extras||[]).map(e=>Object.assign({sig:.42, bright:1.6, det:FLAT}, e));
+    realStars=(real.stars||[]).map(p=>({x:p.x, y:p.y, f:1, det:FLAT, id:"Background star"}));
+  }
   const avoid=[target, ...extras].flatMap(o=>o.positions);
-  const field={N, seed:1000+n*97, stars:real?.stars || makeStars(N,1000+n*97,avoid), target:Object.assign({key:"train"+n, mol:target.mol||{}}, target), extras, epochs, sim, training:n, ra:0, dec:0, fov:N*CONFIG.PIX_ARCSEC/3600};
+  const field={N:gridN, seed:1000+n*97, stars:realStars || makeStars(N,1000+n*97,avoid), target:Object.assign({key:"train"+n, mol:target.mol||{}}, target), extras, epochs, sim, training:n, ra:0, dec:0, fov:gridN*(real?.pixel_arcsec||CONFIG.PIX_ARCSEC)/3600};
   return field;
 }
 
 /* data the panels show for training objects */
 function trainingObj(n, which){
+  const r4=TRAINING_DATA[4]?.obj;
+  if(n===4 && r4) return {name:"CRBR 2422.8-3423", kind:"Young star in an icy cloud", status:"known", catalog:"SIMBAD · CRBR 2422.8-3423 · embedded protostar (Ophiuchus)",
+                    motion:{arcsec_per_yr:null}, variability:{ratio:1}, molecules:r4.molecules, spectrum:r4.spectrum, isTarget:true,
+                    vtext:["Young star wrapped in ice","Its light passes through frozen CO₂ and CO in the disk and cloud around it."]};
   if(n===4) return {name:"The dot from Level 1", status:"candidate", catalog:null, motion:{arcsec_per_yr:null}, variability:{ratio:1},
                     molecules:{water:.12,methane:.02,co2:.82,co:.14}, spectrum:makeSpectrum({teff:5800, mol:{water:.12,methane:0,co2:.82,co:.14}}, 4404), isTarget:true};
   if(which==="target") return {name:"Known asteroid (training example)", status:"known", catalog:"Minor Planet Center · training example", training:true,
@@ -886,7 +911,8 @@ function trainingObj(n, which){
           spectrum:makeSpectrum({teff:850, mol:{water:.34,methane:.46,co2:.06,co:.15}}, 5502), isTarget:true};
 }
 
-function startTraining(n){
+async function startTraining(n){
+  await TRAINING_READY;
   leavePlay(); const L=LEVELS[n-1];
   S.ctx="training"; S.level=n; S.tr={checked:{}, marked:false, reported:false, lens:false, hintStage:0};
   show("play"); resetViewerState();
@@ -900,7 +926,7 @@ function startTraining(n){
   S.det=4; S.field=buildTraining(n); computeFrames();
   const real=TRAINING_DATA[n];
   if(real?.frames){ const id=S.scanId; Promise.all(real.frames.map(loadImg)).then(imgs=>{ if(S.scanId!==id) return;
-    S.apiFrames={frames:imgs.map((img,i)=>({img, label:S.field.epochs[i]}))}; draw(); }).catch(()=>toast("Frames missing","Running this level on the simulation.")); }
+    S.apiFrames={frames:imgs.map((img,i)=>({img, label:S.field.epochs[i]})), pixel_arcsec:real.pixel_arcsec, training:true}; draw(); }).catch(()=>toast("Frames missing","Running this level on the simulation.")); }
   $("simNote").hidden=false; $("simNote").textContent=S.field.sim;
   S.speed = n===3 ? 900 : 700;
   if(n===4){ S.selected="target"; S.lastObj=trainingObj(4); renderSpectrum(S.lastObj); }
@@ -938,11 +964,11 @@ function onTrainingHit(hit){
   }
   if(n===3){
     if(hit.kind==="target") return winLevel();
-    return say(hit.kind==="star" ? "This one didn't move between 2010 and 2025: it's a distant star." : "Nothing there. Tap right on a dot.");
+    return say(hit.kind==="star" ? "This one didn't move between 2010 and 2024: it's a distant star." : "Nothing there. Tap right on a dot.");
   }
   if(n===4){
     if(hit.kind==="target") return say(t.lens ? "Yes, that's our dot. Now answer the question above." : "Yes, that's the dot from Level 1. Now switch the lenses below.", true);
-    return say("That one's a star. Our dot is the fuzzy one that moves.");
+    return say(TRAINING_DATA[4] ? "That one's a background star. Our young star is the one in the middle." : "That one's a star. Our dot is the fuzzy one that moves.");
   }
   if(n===5){
     if(hit.kind==="target" || hit.kind==="candidate"){
@@ -961,6 +987,7 @@ function checkL5(){ const t=S.tr; if(t.checked.target && t.checked.extra && t.ma
 function onTrainingLens(l){
   if(S.level!==4 || S.tr.finished) return;
   if(l==="none") return;
+  if(l==="co" && TRAINING_DATA[4]){ say("A little CO ice too. But another lens lights it up even more. Try it."); return; }
   if(l!=="co2"){ say(`No big change in the ${MOLS[l].label} lens. Try another one.`); return; }
   S.tr.lens=true;
   say("Look at that cloud! Something around the dot eats light at 4.3 µm.", true);
@@ -1181,11 +1208,13 @@ const api = {
     const u=new URL(CONFIG.API_BASE+path); for(const k in params) u.searchParams.set(k, params[k]);
     const ac = timeoutMs && typeof AbortController!=="undefined" ? new AbortController() : null;
     const tm = ac ? setTimeout(()=>ac.abort(), timeoutMs) : null;
-    try{ const r=await fetch(u, ac?{signal:ac.signal}:{}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+    try{ const r=await fetch(u, ac?{signal:ac.signal}:{});
+      if(!r.ok){ let d=""; try{ d=(await r.json()).detail||""; }catch(_){} throw new Error(d ? String(d).slice(0,160) : r.status); }   // the server explains, e.g. "IRSA is not responding"
+      return await r.json(); }
     catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
     finally{ if(tm) clearTimeout(tm); }
   },
-  frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence,source:S.survey}); },
+  frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 180000); },   // cold fields take 15–90 s (right after a deploy the cache is empty)
   object(ra,dec,snap=true){ return this.get("/api/object", snap?{ra,dec}:{ra,dec,snap:0}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
@@ -1353,13 +1382,17 @@ function updateHud(){
 async function scan(ra, dec, fov, key){
   stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.lensPending=[]; S.selSky=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
-  $("emptyState").style.display="none"; $("loading").classList.add("on");
-  try{
-    S.field = buildField(ra, dec, fov, key);
-    S.apiFrames=null;
-    if(CONFIG.API_BASE){ await loadApiFrames(); }
-    else { await new Promise(r=>setTimeout(r,350)); computeFrames(); }
-  }catch(err){ toast("Archive unreachable", "Showing the simulated sky instead. ("+err.message+")"); CONFIG.API_BASE=null; $("demoNote").style.display=""; computeFrames(); }
+  const c=checkCoords(ra, dec, fov); if(!c){ $("loading").classList.remove("on"); return; }
+  [ra, dec, fov]=c;
+  $("emptyState").style.display="none"; $("errState").style.display="none"; $("loading").classList.add("on");
+  S.field = buildField(ra, dec, fov, key);
+  S.apiFrames=null;
+  if(CONFIG.API_BASE){   // real data: a failure shows an error with a retry; the API stays on for the next scan
+    S.field.live=true;
+    try{ if(!await loadApiFrames()) return; }   // false: a newer scan or switch owns the viewer
+    catch(err){ if(S.scanId===myScan) scanFailed(err, [ra, dec, fov, key]); return; }
+  }
+  else { await new Promise(r=>setTimeout(r,350)); if(S.scanId!==myScan) return; computeFrames(); }   // ?api=demo only
   if(S.scanId!==myScan) return;
   $("loading").classList.remove("on");
   S.epoch=0; draw(); play();
@@ -1368,9 +1401,26 @@ async function scan(ra, dec, fov, key){
   if(!key && !S.field.target && !S.apiFrames) toast("Quiet patch", "Nothing moving here. Shift the coordinates a little and scan again.");
 }
 function computeFrames(){ S.frames = S.field.epochs.map((_,e)=>renderFrame(S.field, e, S.det)); S.apiFrames=null; }
-// Before the frames change (detector, cadence): the star list is rebuilt for the new frames, so keep the
-// selection as a grid position, drop the old path and ignore any path request still on its way.
-// The selection is kept in sky coordinates (S.selSky): the new frames may even be another grid (WISE).
+// Field of view: the values the #fovIn select offers. RA wraps; Dec outside ±90° or garbage is refused.
+const FOVS=[...document.querySelectorAll("#fovIn option")].map(o=>+o.value), FOV_DEF=0.1;
+function clampFov(v){ v=+v; if(!isFinite(v)||v<=0) return FOV_DEF; v=Math.min(Math.max(v,FOVS[0]),FOVS[FOVS.length-1]); return FOVS.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a); }
+function checkCoords(ra, dec, fov, quiet){
+  ra=+ra; dec=+dec;
+  if(!isFinite(ra)||!isFinite(dec)||dec<-90||dec>90){ if(!quiet) toast("Check the coordinates","RA 0–360° or hh mm ss; Dec −90…+90° or ±dd mm ss."); return null; }
+  const f=clampFov(fov); if(!quiet && f!==+fov) toast("Field of view adjusted", `${fov}° is outside ${FOVS[0]}–${FOVS[FOVS.length-1]}°, using ${f}°.`);
+  return [((ra%360)+360)%360, dec, f];
+}
+function scanFailed(err, args){
+  $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
+  const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
+  $("errText").textContent=`No frames came back (${err.message||"network error"}). The archive can be slow or busy; try again in a moment.`;
+  $("errState").style.display=""; $("retryBtn").onclick=()=>scan(...args);
+  toast("Archive didn't answer", "No frames for this patch. Tap “Try again” or scan another one.");
+}
+// Loads real frames for the current field. Returns false (and changes nothing) if a newer scan or
+// detector/cadence switch started meanwhile; throws only if this request is still the current one.
+// Before the frames change (detector, cadence, survey) the star list is rebuilt, maybe on another grid (WISE):
+// the selection lives on in sky coordinates (S.selSky); drop the old path and ignore path requests in flight.
 function freezeSelection(){
   if(S.selected!=null && S.selected!=="target" && !S.selSky) S.selected=null;   // nothing to carry over
   S.track=null; S.trackReq=(S.trackReq||0)+1;
@@ -1382,17 +1432,39 @@ async function refollow(){
   await followTrack(S.selSky.ra, S.selSky.dec);
 }
 async function loadApiFrames(){
-  const f=S.field;
-  const data=await api.frames(f.ra,f.dec,f.fov,S.det,"blink");
-  for(const fr of data.frames) fr.img=await loadImg(fr.png);
-  if(data.diff) for(const fr of data.diff) fr.img=await loadImg(fr.png);
+  const f=S.field, id=S.scanId, req=S.frameReq=(S.frameReq||0)+1;
+  const stale=()=>id!==S.scanId || req!==S.frameReq || f!==S.field;
+  let data;
+  try{
+    for(;;){   // the detector or cadence may change while a scan is loading: ask again with the new one
+      const det=S.det, cad=S.cadence, src=S.survey;
+      data=await api.frames(f.ra,f.dec,f.fov,det,"blink",cad,src);
+      if(stale()) return false;
+      for(const fr of data.frames) fr.img=await loadImg(fr.png);
+      if(data.diff) for(const fr of data.diff) fr.img=await loadImg(fr.png);
+      if(stale()) return false;
+      if(det===S.det && cad===S.cadence && src===S.survey) break;
+    }
+  }catch(e){ if(stale()) return false; throw e; }
   f.N=data.size_px||f.N; S.apiFrames=data;
   S.epoch=Math.min(S.epoch, data.frames.length-1);   // frame count differs per detector and cadence
   f.stars=(data.sources||[]).map(s=>({x:s.x, y:s.y, f:1, det:[1,1,1,1,1,1], id:s.id||"Source"}));
   const key=f.target?.key||null;
   f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}} : null;
   loadMovers();
+  return true;
 }
+// Detector / cadence switch on a real field: reload its frames; on failure keep the old frames and settings.
+async function reloadFrames(undo, after){
+  $("loading").classList.add("on");
+  let ok;
+  freezeSelection();
+  try{ ok=await loadApiFrames(); if(ok) await refollow(); }
+  catch(e){ ok=null; undo(); refollow(); toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
+  if(ok===false) return;   // a newer scan or switch owns the viewer and the spinner
+  $("loading").classList.remove("on"); if(ok && after) after(); draw();
+}
+const segOn=(id,attr,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on", b.dataset[attr]===String(val)));
 
 // Moving candidates (asteroids, comets) on "Every visit" frames: spots that are there now but not on the
 // other frames. Fetched per field + detector; drawn as amber diamonds, solid on the frames they appear in.
@@ -1442,7 +1514,7 @@ bindSeg("zoomSeg","z", z=>{ S.zoom=+z; if(S.field) draw(); track("zoom",{val:+z}
 // Per-pixel molecule maps of the field (real data): fetched once per field, on the first lens switch.
 async function ensureLens(){
   const f=S.field;
-  if(!S.apiFrames || !f || S.lensMaps?.field===f || S.lensLoading===f) return;
+  if(!S.apiFrames || S.apiFrames.training || !f || S.lensMaps?.field===f || S.lensLoading===f) return;
   S.lensLoading=f; draw();
   try{
     const d=await api.lens(f), imgs={};
@@ -1458,7 +1530,7 @@ async function ensureLens(){
 // Ask the server to colour a clicked object by its spectrum. The paint is kept for the field,
 // so it stays when the user clicks something else.
 async function lensPaint(f, o){
-  if(!S.apiFrames || !f || !o) return;
+  if(!S.apiFrames || S.apiFrames.training || !f || !o) return;
   if(S.lensMaps?.field!==f){ (S.lensPending=S.lensPending||[]).push({f, ra:o.ra, dec:o.dec}); return; }
   try{
     const d=await api.lens(f, o), imgs={};
@@ -1469,13 +1541,13 @@ async function lensPaint(f, o){
 bindSeg("lensSeg","l", l=>{ S.lens=l; if(l!=="none") ensureLens(); if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
 $("detSeg").innerHTML = DETECTORS.map(d=>`<button data-d="${d.id}" class="${d.id===S.det?"on":""}">D${d.id}</button>`).join("");
 $("detHint").textContent = DETECTORS[S.det-1].range;
+function setDet(d){ S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range; segOn("detSeg","d",S.det); if(S.lastObj) renderSpectrum(S.lastObj); }   // spectrum: move the highlighted band
 bindSeg("detSeg","d", async d=>{
-  S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range;
-  if(S.lastObj) renderSpectrum(S.lastObj);   // move the highlighted detector band under the spectrum
+  const prev=S.det; setDet(d);
   track("detector",{val:+d});
   if(!S.field) return;
-  if(S.apiFrames){ $("loading").classList.add("on"); freezeSelection(); try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
-  draw();
+  if(S.field.live){ if(S.apiFrames) reloadFrames(()=>setDet(prev)); }   // still loading: the pending request picks up the new detector
+  else { computeFrames(); draw(); }
 });
 
 // Ask the server where the clicked object sits on each frame of the current detector.
@@ -1506,7 +1578,7 @@ async function followTrack(ra, dec){
   }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
 }
 
-// Frames: one per six-month sky pass, or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
+// Frames: one per sky pass (passes are weeks to months apart, not a fixed spacing), or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
 // Survey: SPHEREx (2025–26, six colours, chemistry) or WISE/NEOWISE W2 (2010–24, fourteen years of motion).
 function applySurveyPlates(){
   if(!CONFIG.API_BASE || S.ctx==="training") return;
@@ -1515,23 +1587,17 @@ function applySurveyPlates(){
   $("survHint").textContent = wise ? "WISE W2 4.6 µm · a frame every 6 months since 2010 · via WiseView" : "6 infrared colours and chemistry";
 }
 bindSeg("survSeg","s", async v=>{
-  S.survey=v; track("survey",{val:v});
+  const prev=S.survey; S.survey=v; track("survey",{val:v});
   if(v==="wise" && S.lens!=="none"){ S.lens="none"; [...$("lensSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.l==="none")); if(S.lastObj) renderSpectrum(S.lastObj); }
   applySurveyPlates();
-  if(!S.apiFrames) return;
-  stop(); $("loading").classList.add("on");
-  freezeSelection();
-  try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); }
-  $("loading").classList.remove("on"); S.epoch=0; draw(); play();
+  if(!S.field?.live || !S.apiFrames) return;   // still loading: the pending request picks up the new survey
+  stop(); reloadFrames(()=>{ S.survey=prev; segOn("survSeg","s",prev); applySurveyPlates(); play(); }, ()=>{ S.epoch=0; play(); });
 });
+function cadHint(){ $("cadHint").textContent = S.cadence==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass"; }
 bindSeg("cadSeg","c", async c=>{
-  S.cadence=c; track("cadence",{val:c});
-  $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
-  if(!S.apiFrames) return;
-  stop(); $("loading").classList.add("on");
-  freezeSelection();
-  try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); }
-  $("loading").classList.remove("on"); S.epoch=0; draw(); play();
+  const prev=S.cadence; S.cadence=c; track("cadence",{val:c}); cadHint();
+  if(!S.field?.live || !S.apiFrames) return;   // still loading: the pending request picks up the new cadence
+  stop(); reloadFrames(()=>{ S.cadence=prev; segOn("cadSeg","c",prev); cadHint(); play(); }, ()=>{ S.epoch=0; play(); });
 });
 
 /* ---------- selecting objects ---------- */
@@ -1592,10 +1658,17 @@ canvas.addEventListener("click", async e=>{
 
 /* ---------- crew file card ---------- */
 function isMoving(o){ const m=o.motion||{}; return typeof m.significant==="boolean" ? m.significant : (m.arcsec_per_yr||0)>=2; }
+// A still source with no catalogue match is not a discovery. The server flags "too faint" in variability.label
+// ("Объект слишком тусклый" / "Недостаточно данных") and leaves the motion error empty when nothing could be measured.
+function isUnmatchedStar(o){ return o.status==="star" && !o.catalog; }
+function isFaint(o){ return isUnmatchedStar(o) && (/тускл|недостаточно|faint|not enough/i.test(o.variability?.label||"") || o.motion?.arcsec_per_yr_err==null); }
+function objTitle(o, train){ if(o.name) return o.name; if(o.status==="star") return isFaint(o)?"Nothing measurable here":"Faint background source"; return train?"Training candidate":"Unidentified mover"; }
 function verdict(o){
   if(o.vtext) return o.vtext;
   const mv=isMoving(o), m=o.molecules||{}, vr=o.variability?.ratio||1;
   if(vr>=1.5 && !mv) return ["Variable star","Brightness changes, position steady."];
+  if(isFaint(o)) return ["Nothing measurable here","Too faint to measure its motion or spectrum. Try a brighter dot."];
+  if(isUnmatchedStar(o)) return ["Faint background source","Steady and still, too faint for the catalogues. Not a discovery: discoveries move or change."];
   if(mv && m.methane>=SIGN) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
   if(mv && m.water>=.3) return ["Possibly a brown dwarf","Moves, with a strong water dip. Worth a closer look."];
   if(mv) return ["Nearby star on the move","High proper motion, no cold-world chemistry."];
@@ -1605,7 +1678,7 @@ function compass(pa){ if(pa==null) return ""; const dirs=["N","NE","E","SE","S",
 function renderFile(o){
   const [vt,vs]=verdict(o);
   const marked = S.ctx==="training" && S.tr.marked && o.status==="candidate";
-  const statusTxt={known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:"CATALOGUED STAR"}[o.status]||"OBJECT";
+  const statusTxt={known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
   const pm=o.motion||{}, arrow = pm.pa_deg!=null && isMoving(o) ? `<span class="arrow" style="transform:rotate(${-pm.pa_deg}deg)">↑</span> ${compass(pm.pa_deg)}` : "—";
   const cat = pm.catalog_arcsec_per_yr ? ` <span style="color:var(--muted-ink)">· catalogue ${pm.catalog_arcsec_per_yr}″/yr</span>` : "";
   const mols=Object.keys(MOLS).map(k=>{ const v=Math.max(0,o.molecules?.[k]||0), sign=v>=SIGN;
@@ -1613,13 +1686,13 @@ function renderFile(o){
   const inL5 = S.ctx==="training" && S.level===5;
   $("file").innerHTML = `
     <span class="label">Who is it?</span>
-    <h3>${esc(o.name||(inL5?"Training candidate":"Unidentified mover"))}</h3>
+    <h3>${esc(objTitle(o, inL5))}</h3>
     <span class="status ${o.status}">${statusTxt}</span>
     <dl class="rows">
-      <div><dt>Motion</dt><dd><b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}</dd></div>
+      <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}`}</dd></div>
       <div><dt>Heading</dt><dd>${arrow}</dd></div>
       <div><dt>Brightness</dt><dd>${(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
-      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>"}</dd></div>
+      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
     </dl>
     <div class="mols">${mols}</div>
     <div class="verdict"><b>${vt}</b>${vs}</div>
@@ -1681,17 +1754,17 @@ async function openReport(o){
   txt(g,"SPACE ACADEMY",82,170,"600 18px Manrope","rgba(243,238,228,.55)",5);
   const train = S.field?.training;
   txt(g,train?"FIELD REPORT · TRAINING":"FIELD REPORT · NASA SPHEREx DATA",80,300,"600 22px Manrope","#F6B544",6);
-  const title=(o.name||(train?"Training candidate":"Unidentified mover")).toUpperCase(); g.font="200 76px Unbounded";
+  const title=objTitle(o, train).toUpperCase(); g.font="200 76px Unbounded";
   const words=title.split(" "); let line_="", yy=400; for(const w of words){ const tst=line_?line_+" "+w:w; if(g.measureText(tst).width>900 && line_){ txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4"); line_=w; yy+=88; } else line_=tst; } txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4");
   yy+=80; const [vt]=verdict(o);
   txt(g,vt,80,yy,"600 32px Manrope","#F07A3A");
   const f=S.field; const rows=[["FIELD", train?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
-    ["CHEMISTRY", Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":"Catalogued"]];
+    ["CHEMISTRY", Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
   yy+=70; for(const [k,v] of rows){ txt(g,k,80,yy,"600 18px Manrope","rgba(243,238,228,.5)",5); txt(g,v,330,yy,"400 28px Manrope","#F3EEE4"); yy+=58; }
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;
   $("copyLink").hidden = !!train;
-  // real finds go to our server (free exploration on real SPHEREx data; training levels are simulated)
+  // real finds go to our server (free exploration on real SPHEREx data; training finds are not real discoveries)
   S.reportObj=o;
   const canSend = !!CONFIG.API_BASE && S.ctx==="free" && !!S.apiFrames;
   $("sendReport").hidden=!canSend; $("sendReport").disabled=false; $("sendReport").textContent="Send report";
@@ -1771,8 +1844,8 @@ $("copySite").onclick=async()=>{ try{ await navigator.clipboard.writeText(SITE_U
 /* ---------- wiring & boot ---------- */
 $("searchForm").onsubmit=e=>{
   e.preventDefault();
-  const ra=parseRA($("raIn").value), dec=parseDec($("decIn").value), fov=+$("fovIn").value;
-  if(!isFinite(ra)||!isFinite(dec)||ra<0||ra>=360||dec<-90||dec>90) return toast("Check the coordinates","RA 0–360° or hh mm ss; Dec −90…+90° or ±dd mm ss.");
+  const c=checkCoords(parseRA($("raIn").value), parseDec($("decIn").value), $("fovIn").value); if(!c) return;
+  const [ra, dec, fov]=c;
   const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;
   if(S.ctx==="free") freeTitle();
   scan(ra,dec,fov,key);
@@ -1788,12 +1861,16 @@ window.addEventListener("resize",()=>S.field&&!$("vPlay").hidden&&updateHud());
 
 (function boot(){
   if(CONFIG.API_BASE) $("demoNote").style.display="none";
-  resetFile(); clearSpectrum(); renderProgress();
+  resetFile(); clearSpectrum(); renderProgress(); refreshSurprises();
   const q=new URLSearchParams(location.search), ra=parseRA(q.get("ra")||""), dec=parseDec(q.get("dec")||"");
-  if(isFinite(ra)&&isFinite(dec)&&q.get("ra")){
-    $("raIn").value=ra; $("decIn").value=dec; if(q.get("fov")) $("fovIn").value=q.get("fov");
-    const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;
-    startFree([ra,dec,+$("fovIn").value,key]);
+  if(q.get("ra")||q.get("dec")){   // shared link: validate before asking the server anything
+    const c=checkCoords(ra, dec, q.get("fov")||FOV_DEF, true);
+    if(!c){ startFree(); toast("This link has bad coordinates", `RA ${esc(q.get("ra")||"?")}, Dec ${esc(q.get("dec")||"?")} is not on the sky (Dec must be −90…+90°). Pick a patch instead.`); return; }
+    const [r, d, fov]=c;
+    if(q.get("fov") && fov!==+q.get("fov")) toast("Field of view adjusted", `${esc(q.get("fov"))}° is outside ${FOVS[0]}–${FOVS[FOVS.length-1]}°, using ${fov}°.`);
+    $("raIn").value=r; $("decIn").value=d; $("fovIn").value=String(fov);
+    const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-r)<.01&&Math.abs(TARGETS[k].dec-d)<.01)||null;
+    startFree([r,d,fov,key]);
   }
 })();
 </script>

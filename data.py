@@ -51,15 +51,30 @@ def _key(*parts) -> str:
     return hashlib.md5("|".join(map(str, parts)).encode()).hexdigest()[:12]
 
 
-def _tap(query: str, retries: int = 3) -> Table:
+TAP_TIMEOUT_S = float(os.environ.get("SKYWATCH_TAP_TIMEOUT", "40"))
+_TAP_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="tap")   # timed-out calls keep a thread ~2 min
+
+
+def _tap(query: str, retries: int = 2) -> Table:
+    """IRSA TAP query with a hard deadline per attempt.
+
+    pyvo sets no connect timeout, so an unreachable IRSA hangs ~2 min per attempt on Linux; with the old
+    3 attempts the request outlived Railway's 5-minute proxy limit and the site got a bare 502. Now the
+    whole search gives up after ~85 s and the site can say so (the stuck thread finishes on its own).
+    """
+    from concurrent.futures import TimeoutError as FutureTimeout
     from astroquery.ipac.irsa import Irsa
     for attempt in range(retries):
+        fut = _TAP_POOL.submit(lambda: Irsa.query_tap(query).to_table())
         try:
-            return Irsa.query_tap(query).to_table()
-        except Exception:
-            if attempt == retries - 1:
-                raise
-            _time.sleep(10 * (attempt + 1))
+            return fut.result(timeout=TAP_TIMEOUT_S)
+        except FutureTimeout:
+            err = TimeoutError(f"IRSA did not answer within {TAP_TIMEOUT_S:.0f} s")
+        except Exception as e:
+            err = e
+        if attempt == retries - 1:
+            raise err
+        _time.sleep(5)
 
 
 NEAR_ARCSEC = 3.0  # запрос в пределах 3″ от закэшированного центра берётся из кэша
@@ -99,7 +114,7 @@ def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = 
         if hit is not None:
             return Table.read(hit)
     if offline:
-        raise FileNotFoundError(f"нет кэша для RA={ra} Dec={dec} size={size_deg}")
+        raise FileNotFoundError(f"no cache for RA={ra} Dec={dec} size={size_deg}")
 
     query = f"""
     SELECT a.uri, p.time_bounds_lower, p.energy_bandpassname,
@@ -163,7 +178,7 @@ def _download(url: str, dest: Path, retries: int = 3) -> None:
             except Exception as e:
                 last = e
                 _time.sleep(1 + attempt)
-        print(f"  ! AWS не отдал вырезку ({last}); пробую сервис IRSA")
+        print(f"  ! AWS did not return the cutout ({last}); trying the IRSA service")
     for attempt in range(retries):
         try:
             with urlopen(url, timeout=conf.remote_timeout) as resp:
@@ -231,7 +246,7 @@ def load_cutouts(table: Table, max_workers: int = 16, progress: bool = True,
         try:
             return load_cutout(row["url"], time=row["time"])
         except Exception as e:  # сеть/архив: не роняем всю загрузку
-            print(f"  ! пропуск {row['obs_id']}: {e}")
+            print(f"  ! skipping {row['obs_id']}: {e}")
             return None
 
     out, n = [], len(table)
@@ -240,7 +255,7 @@ def load_cutouts(table: Table, max_workers: int = 16, progress: bool = True,
             if c is not None:
                 out.append(c)
             if progress and (i % 25 == 0 or i == n):
-                print(f"  вырезки: {i}/{n}")
+                print(f"  cutouts: {i}/{n}")
             if on_progress is not None:
                 on_progress(i, n)
     return out

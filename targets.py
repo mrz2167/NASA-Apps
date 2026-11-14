@@ -18,28 +18,28 @@ DEFAULT_WHEN = "2025-11-15"
 
 TARGETS = {
     "barnard": dict(
-        title="Звезда Барнарда", simbad="Barnard's Star", catalog_en="SIMBAD · Barnard's Star · M4V red dwarf", kind="близкая звезда, самое быстрое собственное движение",
+        title="Barnard's Star", simbad="Barnard's Star", catalog_en="SIMBAD · Barnard's Star · M4V red dwarf", kind="nearby star with the fastest known proper motion",
         gaia_dr3=4472832130942575872, ra=269.44850252543836, dec=4.739420051112412,
         pmra=-801.5509783684709, pmdec=10362.394206546573, parallax=546.975939730948, epoch=2016.0,
     ),
     "eps_ind_b": dict(
-        title="Эпсилон Индейца B", simbad="eps Ind B", catalog_en="SIMBAD · eps Ind Ba + Bb · T1 + T6 brown dwarfs", kind="пара коричневых карликов у звезды eps Ind A",
+        title="Epsilon Indi B", simbad="eps Ind B", catalog_en="SIMBAD · eps Ind Ba + Bb · T1 + T6 brown dwarfs", kind="pair of brown dwarfs orbiting eps Ind A",
         gaia_dr3=6412596012146801152, ra=331.07645259656397, dec=-56.79381206688221,
         pmra=3981.97666296105, pmdec=-2466.8318147663504, parallax=270.6580324694526, epoch=2016.0,
     ),
     "wise0855": dict(
-        title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", catalog_en="SIMBAD · WISE J085510.83−071442.5 · Y4 brown dwarf", kind="самый холодный известный коричневый карлик",
+        title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", catalog_en="SIMBAD · WISE J085510.83−071442.5 · Y4 brown dwarf", kind="coldest known brown dwarf",
         gaia_dr3=None, ra=133.81890825, dec=-7.247048,
         pmra=-8123.7, pmdec=673.2, parallax=439.0, epoch=2000.0,
         when="2026-01-01",  # под эту дату скачан кэш (центр вырезки)
     ),
     "rw_aur": dict(
-        title="RW Возничего", simbad="RW Aur", catalog_en="SIMBAD · RW Aur · T Tauri variable", kind="молодая переменная звезда (тип T Тельца)",
+        title="RW Aurigae", simbad="RW Aur", catalog_en="SIMBAD · RW Aur · T Tauri variable", kind="young variable star (T Tauri type)",
         gaia_dr3=156430822114424576, ra=76.95608119552952, dec=30.401204589097233,
         pmra=2.6406431770317083, pmdec=-27.397582540455325, parallax=6.406249329219477, epoch=2016.0,
     ),
     "r_dra": dict(
-        title="R Дракона", simbad="R Dra", catalog_en="SIMBAD · R Dra · Mira variable", kind="переменная звезда типа Миры",
+        title="R Draconis", simbad="R Dra", catalog_en="SIMBAD · R Dra · Mira variable", kind="Mira-type variable star",
         gaia_dr3=1648328016354496384, ra=248.1673783672889, dec=66.75500674547219,
         pmra=-20.642811719160797, pmdec=6.148818852711324, parallax=1.2509180143740992, epoch=2016.0,
     ),
@@ -62,7 +62,7 @@ def simbad_coord(name: str, when: str = DEFAULT_WHEN) -> SkyCoord:
     """Любой объект по имени из SIMBAD -> координаты на дату when (позиции SIMBAD даны на J2000)."""
     r = simbad().query_object(name)
     if r is None or len(r) == 0:
-        raise ValueError(f"SIMBAD не знает объект {name!r}")
+        raise ValueError(f"SIMBAD does not know the object {name!r}")
     r = r[0]
     pmra = float(r["pmra"]) if r["pmra"] is not None and np.isfinite(r["pmra"]) else 0.0
     pmdec = float(r["pmdec"]) if r["pmdec"] is not None and np.isfinite(r["pmdec"]) else 0.0

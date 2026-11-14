@@ -1,7 +1,7 @@
 """Координаты, движение, переменность и карточка «Кто это?» (Питонист 3).
 
     now_coord(name, when)                         -> SkyCoord на дату
-    measure_motion(frames, coord, target_wcs)     -> скорость ″/год, направление, ошибка, положения
+    measure_motion(frames, coord, target_wcs)     -> скорость ″/yr, направление, ошибка, положения
     measure_variability(frames, coord, target_wcs)-> размах яркости, метка
     who_is_it(coord, motion, scores, variability) -> карточка для интерфейса
 
@@ -60,7 +60,7 @@ def now_coord(name: str, when: str = "2026-01-01") -> SkyCoord:
         try:
             return SkyCoord.from_name(name)  # без собственного движения
         except Exception:
-            raise RuntimeError(f"Не удалось получить координаты для '{name}': {e}")
+            raise RuntimeError(f"Could not get coordinates for '{name}': {e}")
 
 
 def _build_default_wcs(coord: SkyCoord, shape: tuple, pix_arcsec: float = PIX_ARCSEC) -> WCS:
@@ -315,11 +315,11 @@ def measure_variability(frames: list, coord: SkyCoord, target_wcs: WCS = None) -
     звёзд это добавляет ~10–20% к размаху; порог «переменная» — 30%.
     """
     if not frames or len(frames) < 2:
-        return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Недостаточно данных"}
+        return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Not enough data"}
     by_det = _group(frames, target_wcs)
     dets = _select_detectors(by_det, coord, top=1)
     if not dets:
-        return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Объект слишком тусклый"}
+        return {"is_variable": False, "rel_amp": 0.0, "fluxes": [], "label": "Object too faint"}
 
     items = by_det[dets[0]]
     wings, r_sat = False, 2.0
@@ -353,20 +353,20 @@ def measure_variability(frames: list, coord: SkyCoord, target_wcs: WCS = None) -
             fluxes.append(f); dates.append(str(date)); errs.append(e)
 
     if len(fluxes) < 2:
-        return {"is_variable": False, "rel_amp": 0.0, "fluxes": fluxes, "label": "Недостаточно данных"}
+        return {"is_variable": False, "rel_amp": 0.0, "fluxes": fluxes, "label": "Not enough data"}
     med = float(np.median(fluxes))
     rel = float((max(fluxes) - min(fluxes)) / med)
     signif = (max(fluxes) - min(fluxes)) / (np.sqrt(2) * np.median(errs)) if np.median(errs) > 0 else np.inf
     is_var = rel > 0.30 and signif > 5
-    how = " (по крыльям: ядро пересвечено)" if wings else ""
+    how = " (measured on the wings: saturated core)" if wings else ""
     if rel > 0.30 and not is_var:
-        label = f"Разброс {rel * 100:.0f}% в пределах шума — переменность не доказана"
+        label = f"Scatter {rel * 100:.0f}% is within the noise: variability not proven"
     elif rel > 0.6:
-        label = f"Сильная переменность (размах {rel * 100:.0f}%){how}"
+        label = f"Strong variability (amplitude {rel * 100:.0f}%){how}"
     elif is_var:
-        label = f"Умеренная переменность (размах {rel * 100:.0f}%){how}"
+        label = f"Moderate variability (amplitude {rel * 100:.0f}%){how}"
     else:
-        label = f"Стабильный блеск (разброс {rel * 100:.0f}%){how}"
+        label = f"Steady brightness (scatter {rel * 100:.0f}%){how}"
     return {"is_variable": is_var, "rel_amp": round(rel, 2), "fluxes": [round(f, 2) for f in fluxes],
             "dates": dates, "detector": int(dets[0]), "saturated": wings, "label": label}
 
@@ -394,7 +394,7 @@ def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0, epoch: float 
     """Самая яркая звезда Gaia в радиусе из заранее загруженной таблицы поля.
 
     Координаты Gaia сдвигаются по собственному движению с 2016.0 на эпоху снимков: иначе быстрые звёзды
-    (Каптейна 8.6″/год -> ~85″ за 10 лет) сравниваются с пустым местом и находится чужая фоновая звезда.
+    (Каптейна 8.6″/yr -> ~85″ за 10 лет) сравниваются с пустым местом и находится чужая фоновая звезда.
     """
     if table is None or len(table) == 0:
         return None
@@ -416,12 +416,27 @@ def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0, epoch: float 
     sid = int(r["source_id"])
     return {"found": True, "name": f"Gaia DR3 {sid}", "catalog_id": f"Gaia DR3 {sid}",
             "otype": f"star, G={float(r['phot_g_mean_mag']):.1f}", "source": "Gaia DR3",
-            "pm_arcsec_yr": round(pm, 3) if pm else None, "simbad_url": _simbad_link(coord, 15.0)}
+            "pm_arcsec_yr": round(pm, 3) if pm else None, "simbad_url": _simbad_link(coord, 15.0),
+            "sep_arcsec": round(float(sep[i]), 2)}
+
+
+CATALOG_TIMEOUT_S = 15.0   # SIMBAD/IRSA for one card: a slow archive must not hang "Who is it?"
+
+
+def _deadline(fn, timeout: float = CATALOG_TIMEOUT_S):
+    """fn() with a hard deadline (pyvo/astroquery set no connect timeout); TimeoutError if too slow."""
+    from data import _TAP_POOL
+    from concurrent.futures import TimeoutError as FutureTimeout
+    fut = _TAP_POOL.submit(fn)
+    try:
+        return fut.result(timeout=timeout)
+    except FutureTimeout:
+        raise TimeoutError(f"catalogue did not answer within {timeout:.0f} s") from None
 
 
 def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True) -> dict:
     """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3."""
-    info = {"found": False, "name": "Неизвестный объект", "otype": "", "source": None,
+    info = {"found": False, "name": "Unknown object", "otype": "", "source": None,
             "simbad_url": _simbad_link(coord, radius_arcsec), "pm_arcsec_yr": None, "catalog_id": None}
 
     for key, t in TARGETS.items():
@@ -436,7 +451,7 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
     try:
         s = simbad()
         s.add_votable_fields("otype")
-        res = s.query_region(coord, radius=radius_arcsec * u.arcsec)
+        res = _deadline(lambda: s.query_region(coord, radius=radius_arcsec * u.arcsec))
         if res is not None and len(res) > 0:
             cols = {c.lower(): c for c in res.colnames}
             r0 = res[0]
@@ -454,7 +469,7 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
         pass
 
     try:
-        t = gaia_cone(coord, radius_arcsec, top=1)
+        t = _deadline(lambda: gaia_cone(coord, radius_arcsec, top=1))
         if t is not None and len(t):
             m = match_gaia(coord, t, radius_arcsec)
             if m:
@@ -469,7 +484,7 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     """Карточка «Кто это?» по простым правилам (см. план). cat — готовый результат сверки с каталогами."""
     if cat is None:
         cat = _check_catalogs(coord, online=online)
-    cat = dict({"found": False, "name": "Неизвестный объект", "otype": "", "source": None,
+    cat = dict({"found": False, "name": "Unknown object", "otype": "", "source": None,
                 "simbad_url": _simbad_link(coord, 15.0), "pm_arcsec_yr": None, "catalog_id": None}, **cat)
     motion = motion or {}
     speed = motion.get("speed_arcsec_yr", 0.0) or 0.0
@@ -477,10 +492,10 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     n_ep = motion.get("n_epochs", 0)
     variability = variability or {}
     is_var = variability.get("is_variable", False)
-    var_label = variability.get("label", "Нет данных")
+    var_label = variability.get("label", "No data")
     scores = scores or {}
 
-    # движение считаем значимым, если оно больше 1″/год и больше 2 ошибок (эпох всего 3–5)
+    # движение считаем значимым, если оно больше 1″/yr и больше 2 ошибок (эпох всего 3–5)
     noise = 2 * err if np.isfinite(err) else 2.0
     moving = speed >= max(1.0, noise)
     has_water = (scores.get("water") or 0) > 0.15
@@ -488,24 +503,24 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     has_mol = has_water or has_methane
 
     if n_ep <= 1 or speed > 60.0:
-        verdict = "Возможно, астероид или артефакт (виден на одном кадре или слишком быстрый)"
+        verdict = "Possibly an asteroid or an artefact (seen on one frame only, or moving too fast)"
     elif moving and has_mol:
-        verdict = "Похож на коричневый карлик (движется + признаки метана/воды)"
+        verdict = "Looks like a brown dwarf (moving + signs of methane/water)"
     elif moving:
-        verdict = "Близкая звезда с большим собственным движением"
+        verdict = "Nearby star with a large proper motion"
     elif is_var:
-        verdict = "Переменная звезда (меняет яркость, но стоит на месте)"
+        verdict = "Variable star (changes brightness but stays in place)"
     elif not cat["found"]:
-        verdict = "Неподвижный источник, в каталогах не найден"
+        verdict = "Stationary source, not found in catalogues"
     else:
-        verdict = f"Известный неподвижный источник ({cat['otype'] or 'звезда/галактика'})"
+        verdict = f"Known stationary source ({cat['otype'] or 'star/galaxy'})"
     if moving and not cat["found"] and n_ep > 1 and speed <= 60.0:
-        verdict += " — в каталогах нет: КАНДИДАТ, нужна проверка"
+        verdict += ": not in catalogues. CANDIDATE, needs checking"
 
-    names = {"water": "Вода (H₂O)", "methane": "Метан (CH₄)", "co2": "CO₂", "co": "CO"}
+    names = {"water": "Water (H₂O)", "methane": "Methane (CH₄)", "co2": "CO₂", "co": "CO"}
     badges = [f"{lab}: {scores[k]:.2f}" for k, lab in names.items()
               if scores.get(k) is not None and np.isfinite(scores[k]) and scores[k] > 0.15]
-    speed_txt = (f"{speed:.1f} ± {err:.1f}″/год" if np.isfinite(err) else f"{speed:.1f}″/год")
+    speed_txt = (f"{speed:.1f} ± {err:.1f}″/yr" if np.isfinite(err) else f"{speed:.1f}″/yr")
     return {
         "name": cat["name"], "catalog_found": cat["found"], "catalog_type": cat["otype"],
         "catalog_source": cat["source"], "catalog_id": cat["catalog_id"],
@@ -513,6 +528,6 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
         "speed_arcsec_yr": speed, "speed_err_arcsec_yr": err, "speed_text": speed_txt,
         "direction_deg": motion.get("direction_deg", 0.0), "moving": bool(moving),
         "variability": var_label,
-        "molecule_badges": badges or ["Явных молекулярных полос не выявлено"],
+        "molecule_badges": badges or ["No clear molecular bands detected"],
         "scores": scores, "verdict": verdict, "simbad_url": cat["simbad_url"],
     }
