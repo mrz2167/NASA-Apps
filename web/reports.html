@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LUMEN · Class discoveries</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Unbounded:wght@200;400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --night:#0B1030; --blue:#3D5BD9; --red:#E0352B; --ember:#F07A3A; --amber:#F6B544; --paper:#F3EEE4;
+  --deep:#070A20; --line:rgba(243,238,228,.12); --muted:rgba(243,238,228,.62); --faint:rgba(243,238,228,.42);
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--night);color:var(--paper);font-family:Manrope,system-ui,sans-serif;font-size:15px;line-height:1.5}
+body{min-height:100vh}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+a{color:var(--amber)}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 24px 60px}
+.label{font-weight:600;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+.display{font-family:Unbounded,sans-serif;font-weight:200;letter-spacing:.02em;line-height:1.08}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.wordmark{font-family:Unbounded,sans-serif;font-weight:700;letter-spacing:.3em;text-decoration:none;color:var(--paper)}
+h1{font-size:clamp(26px,4vw,40px);margin:26px 0 8px}
+.sub{color:var(--muted);max-width:720px}
+.btn{border:0;border-radius:999px;padding:10px 18px;font-weight:600;letter-spacing:.04em;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-amber{background:var(--amber);color:var(--night)}
+.btn-ghost{background:transparent;border:1px solid rgba(243,238,228,.35);color:var(--paper)}
+.btn-ghost:hover{border-color:var(--paper)}
+form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:22px;padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:rgba(7,10,32,.55)}
+.field{display:flex;flex-direction:column;gap:6px;flex:1 1 180px}
+.field input,.field select{background:rgba(243,238,228,.06);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none;min-width:0}
+.field input:focus,.field select:focus{border-color:var(--amber)}
+.field select option{background:var(--night)}
+.stats{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}
+.stat{flex:1 1 150px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius)}
+.stat b{display:block;font-family:Unbounded,sans-serif;font-weight:400;font-size:26px;font-variant-numeric:tabular-nums}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-top:18px}
+.msg{margin-top:16px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);color:var(--muted)}
+.msg.warn{border-color:rgba(246,181,68,.5);color:var(--amber)}
+.table-wrap{margin-top:12px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;min-width:860px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px}
+th{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);font-weight:600;background:rgba(7,10,32,.6);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.who b{display:block}
+.who small,.what small{color:var(--faint)}
+.badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.14em;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.badge.candidate{background:var(--red);color:var(--paper)}
+.badge.known{background:rgba(246,181,68,.18);color:var(--amber)}
+.badge.star{background:rgba(243,238,228,.1);color:var(--muted)}
+.badge.training{background:rgba(61,91,217,.25);color:#AFC0FF;margin-top:4px}
+.chem span{display:inline-block;margin-right:6px;white-space:nowrap}
+.links a{display:block;white-space:nowrap}
+.del{background:none;border:0;color:var(--faint);font-size:12px;padding:0}
+.del:hover{color:var(--red)}
+.empty{padding:40px 16px;text-align:center;color:var(--muted)}
+@media (max-width:640px){ .wrap{padding:20px 16px 48px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="wordmark" href="/">LUMEN</a>
+    <a class="btn btn-ghost" href="/">← Back to the sky</a>
+  </header>
+
+  <h1 class="display">Class discoveries</h1>
+  <p class="sub">Every field report your students send lands here: who found it, what it is, how it moves and what it's made of. Candidates are objects no catalogue matched. Check them in SIMBAD or WiseView before calling them new.</p>
+
+  <form id="f" autocomplete="off">
+    <label class="field"><span class="label">Class code</span><input id="code" maxlength="24" placeholder="e.g. 9B-ASTRO"></label>
+    <label class="field"><span class="label">Instructor key (optional)</span><input id="key" type="password" maxlength="80" placeholder="All classes + delete"></label>
+    <label class="field" style="flex:0 1 180px"><span class="label">Show</span>
+      <select id="show"><option value="all">All reports</option><option value="candidate">Candidates only</option><option value="free">Free exploration only</option></select></label>
+    <button class="btn btn-amber" type="submit">Show reports</button>
+  </form>
+
+  <div class="msg" id="msg">Enter the class code you gave your students. Reports only appear for the code they typed.</div>
+
+  <div id="out" hidden>
+    <div class="stats">
+      <div class="stat"><span class="label">Reports</span><b id="sN">0</b></div>
+      <div class="stat"><span class="label">Students</span><b id="sS">0</b></div>
+      <div class="stat"><span class="label">Candidates</span><b id="sC">0</b></div>
+      <div class="stat"><span class="label">With molecule signs</span><b id="sM">0</b></div>
+    </div>
+    <div class="bar">
+      <span class="label" id="upd"></span>
+      <a class="btn btn-ghost" id="csv" href="#">Download CSV</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Student</th><th>Object</th><th>Status</th><th>Motion</th><th>Chemistry</th><th>Where</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const SIGN=0.2, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
+const mem={ get(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
+let data=null, timer=null;
+
+function params(){
+  const p=new URLSearchParams(); const c=$("code").value.trim(), k=$("key").value.trim();
+  if(c) p.set("class",c); if(k) p.set("key",k); return p;
+}
+async function load(){
+  const p=params();
+  if(!p.has("class") && !p.has("key")){ $("msg").textContent="Enter the class code you gave your students."; $("msg").hidden=false; return; }
+  try{
+    const r=await fetch("/api/reports?"+p); const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||r.status);
+    data=d; render(); $("csv").href="/api/reports.csv?"+p;
+    $("upd").textContent="Updated "+new Date().toLocaleTimeString()+" · refreshes every 30 s";
+  }catch(e){ $("out").hidden=true; $("msg").hidden=false; $("msg").className="msg warn"; $("msg").textContent="Couldn't load reports: "+e.message; }
+}
+function render(){
+  const show=$("show").value;
+  let rows=data.reports;
+  if(show==="candidate") rows=rows.filter(r=>r.status==="candidate");
+  if(show==="free") rows=rows.filter(r=>r.source==="free");
+  const all=data.reports;
+  $("sN").textContent=all.length;
+  $("sS").textContent=new Set(all.map(r=>(r.name||"").trim().toLowerCase()).filter(Boolean)).size;
+  $("sC").textContent=all.filter(r=>r.status==="candidate" && r.source==="free").length;
+  $("sM").textContent=all.filter(r=>Object.values(r.molecules||{}).some(v=>v>=SIGN)).length;
+  $("out").hidden=false;
+  const hint=data.persistent_hint && data.instructor ? " ⚠ "+data.persistent_hint : "";
+  $("msg").className="msg"+(hint?" warn":""); $("msg").hidden=!hint; $("msg").textContent=hint.trim();
+  if(!rows.length){ $("rows").innerHTML=`<tr><td colspan="8" class="empty">No reports yet${$("code").value?` for class ${esc($("code").value.trim().toUpperCase())}`:""}. They appear here as soon as a student taps “Send to class”.</td></tr>`; return; }
+  $("rows").innerHTML=rows.map(r=>{
+    const chem=Object.keys(MOL).filter(k=>(r.molecules?.[k]||0)>=SIGN).map(k=>`<span>${MOL[k]} ${r.molecules[k].toFixed(2)}</span>`).join("")||`<span style="color:var(--faint)">none</span>`;
+    const mv=r.motion!=null?`${r.motion.toFixed(2)}″/yr${r.motion_err!=null?` <small style="color:var(--faint)">±${r.motion_err.toFixed(2)}</small>`:""}`:"—";
+    const cat=r.catalog_motion!=null?`<br><small style="color:var(--faint)">catalogue ${r.catalog_motion.toFixed(2)}″/yr</small>`:"";
+    const links = r.ra!=null ? `<a href="/?ra=${r.field_ra??r.ra}&dec=${r.field_dec??r.dec}&fov=${r.fov||0.1}" target="_blank" rel="noopener">Open in LUMEN</a>
+      <a href="http://byw.tools/wiseview#ra=${r.ra}&dec=${r.dec}&size=176&band=2&invert=1" target="_blank" rel="noopener">WiseView</a>
+      <a href="https://simbad.harvard.edu/simbad/sim-coo?Coord=${r.ra}%20${r.dec}&Radius=15&Radius.unit=arcsec" target="_blank" rel="noopener">SIMBAD</a>
+      <small style="color:var(--faint)">${r.ra.toFixed(4)}°, ${r.dec>=0?"+":""}${r.dec.toFixed(4)}°</small>` : `<small style="color:var(--faint)">training field</small>`;
+    return `<tr>
+      <td class="num">${esc(r.created_iso)}</td>
+      <td class="who"><b>${esc(r.name||"Anonymous")}</b><small>${esc(r.class_code||"no class")}</small></td>
+      <td class="what"><b>${esc(r.object_name||"Unidentified object")}</b><br><small>${esc(r.verdict||"")}</small>${r.note?`<br><small>“${esc(r.note)}”</small>`:""}</td>
+      <td><span class="badge ${esc(r.status)}">${{candidate:"CANDIDATE",known:"KNOWN",star:"STAR"}[r.status]||esc(r.status)}</span>${r.source==="level5"?`<br><span class="badge training">LEVEL 5 · TRAINING</span>`:""}</td>
+      <td class="num">${mv}${cat}</td>
+      <td class="chem">${chem}</td>
+      <td class="links">${links}</td>
+      <td>${data.instructor?`<button class="del" data-id="${r.id}" title="Delete this report">Delete</button>`:""}</td>
+    </tr>`; }).join("");
+  document.querySelectorAll(".del").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete report #"+b.dataset.id+"? This can't be undone.")) return;
+    const r=await fetch(`/api/reports/${b.dataset.id}?key=${encodeURIComponent($("key").value.trim())}`,{method:"DELETE"});
+    if(r.ok) load(); else alert("Couldn't delete ("+r.status+")");
+  });
+}
+$("f").onsubmit=e=>{ e.preventDefault(); mem.set("lumen-class",$("code").value.trim()); load(); clearInterval(timer); timer=setInterval(load,30000); };
+$("show").onchange=()=>{ if(data) render(); };
+const q=new URLSearchParams(location.search);
+$("code").value=q.get("class")||mem.get("lumen-class");
+if($("code").value){ load(); timer=setInterval(load,30000); }
+</script>
+</body>
+</html>

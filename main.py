@@ -34,7 +34,10 @@ from astropy.table import Table
 warnings.filterwarnings("ignore")
 
 app = FastAPI(title="LUMEN Skywatch API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST", "DELETE"], allow_headers=["*"])
+
+from reports import router as reports_router  # noqa: E402  общая таблица находок (/api/reports, /reports)
+app.include_router(reports_router)
 
 PIX_ARCSEC = 6.15
 DIFF_POS = np.array([0xF6, 0xB5, 0x44], float)   # ярче — янтарный

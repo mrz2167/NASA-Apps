@@ -7,3 +7,4 @@ scratch/
 out/
 *.zip
 test_pipeline.py
+data

@@ -386,11 +386,25 @@ def gaia_cone(coord: SkyCoord, radius_arcsec: float, top: int = 1000, gmax: floa
     return Irsa.query_tap(q).to_table()
 
 
-def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0) -> dict | None:
-    """Самая яркая звезда Gaia в радиусе из заранее загруженной таблицы поля."""
+GAIA_EPOCH = 2016.0      # эпоха координат Gaia DR3
+SPHEREX_EPOCH = 2025.9   # середина данных SPHEREx (апрель 2025 — октябрь 2026)
+
+
+def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0, epoch: float = SPHEREX_EPOCH) -> dict | None:
+    """Самая яркая звезда Gaia в радиусе из заранее загруженной таблицы поля.
+
+    Координаты Gaia сдвигаются по собственному движению с 2016.0 на эпоху снимков: иначе быстрые звёзды
+    (Каптейна 8.6″/год -> ~85″ за 10 лет) сравниваются с пустым местом и находится чужая фоновая звезда.
+    """
     if table is None or len(table) == 0:
         return None
-    cat = SkyCoord(np.asarray(table["ra"], float), np.asarray(table["dec"], float), unit="deg")
+    ra0, dec0 = np.asarray(table["ra"], float), np.asarray(table["dec"], float)
+    pmra = np.nan_to_num(np.asarray(table["pmra"], float))      # мас/год, уже с cos(dec)
+    pmdec = np.nan_to_num(np.asarray(table["pmdec"], float))
+    dt = epoch - GAIA_EPOCH
+    dec1 = dec0 + pmdec * dt / 3.6e6
+    ra1 = ra0 + pmra * dt / 3.6e6 / np.cos(np.radians(dec0))
+    cat = SkyCoord(ra1 % 360, dec1, unit="deg")
     sep = coord.separation(cat).arcsec
     idx = np.where(sep < radius_arcsec)[0]
     if not len(idx):
