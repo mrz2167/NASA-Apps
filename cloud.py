@@ -76,7 +76,7 @@ def _get(url: str, a: int, b: int) -> bytes:
                 raise requests.HTTPError(f"{r.status_code}", response=r)
             r.raise_for_status()
             if len(r.content) != b - a and r.status_code == 206 and not r.headers.get("Content-Range", "").endswith(f"/{a + len(r.content)}"):
-                raise requests.ConnectionError("короткий ответ")
+                raise requests.ConnectionError("short response")
             return r.content
         except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as e:
             if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code < 500:
@@ -96,7 +96,7 @@ def _header_at(url: str, off: int, guess: int = _HDR_GUESS):
         if pos + BLOCK > len(buf):
             more = _get(url, off + len(buf), off + len(buf) + max(guess, BLOCK))
             if not more:
-                raise ValueError(f"нет конца заголовка по смещению {off}")
+                raise ValueError(f"no end of header at offset {off}")
             buf += more
         blk = buf[pos:pos + BLOCK]
         pos += BLOCK
@@ -129,7 +129,7 @@ def _walk(url: str) -> dict:
         off += hlen + _pad(_data_bytes(h))
     missing = [k for k in KEEP if k not in out]
     if missing:
-        raise ValueError(f"в файле нет HDU {missing}")
+        raise ValueError(f"HDU {missing} not found in the file")
     return out
 
 
@@ -144,13 +144,13 @@ def _box(h: fits.Header, ra: float, dec: float, size_deg: float):
     x0c, y0c = max(0, x0), max(0, y0)
     x1c, y1c = min(nx, x0 + n), min(ny, y0 + n)
     if x1c - x0c < 2 or y1c - y0c < 2:
-        raise ValueError("точка вне детектора")
+        raise ValueError("point is outside the detector")
     return x0c, x1c, y0c, y1c
 
 
 def _rows_f32(url: str, h: fits.Header, data0: int, x0, x1, y0, y1) -> np.ndarray:
     if h["BITPIX"] != -32:
-        raise ValueError(f"ожидался float32, BITPIX={h['BITPIX']}")
+        raise ValueError(f"expected float32, BITPIX={h['BITPIX']}")
     nx = h["NAXIS1"]
     raw = _get(url, data0 + y0 * nx * 4, data0 + y1 * nx * 4)
     arr = np.frombuffer(raw, ">f4").reshape(y1 - y0, nx)[:, x0:x1].astype(np.float32)
@@ -163,7 +163,7 @@ def _rows_rice(url: str, h: fits.Header, data0: int, extra: bytes, x0, x1, y0, y
     nx = h["ZNAXIS1"]
     if (h.get("ZCMPTYPE", "").strip() != "RICE_1" or h.get("ZTILE1") != nx or h.get("ZTILE2", 1) != 1
             or not str(h["TFORM1"]).startswith("1P")):
-        raise ValueError("неподдерживаемое сжатие FLAGS")
+        raise ValueError("unsupported FLAGS compression")
     zval = {h[f"ZNAME{i}"].strip(): h[f"ZVAL{i}"] for i in range(1, 10) if f"ZNAME{i}" in h}
     bytepix, blocksize = int(zval.get("BYTEPIX", 4)), int(zval.get("BLOCKSIZE", 32))
     table_len = h["NAXIS1"] * h["NAXIS2"]
@@ -256,7 +256,7 @@ def _header_from(buf: bytes, pos: int):
         i += BLOCK
         if any(blk[k:k + 3] == b"END" and not blk[k + 3:k + 80].strip() for k in range(0, BLOCK, 80)):
             return fits.Header.fromstring(buf[pos:i].decode("ascii")), i - pos, buf[i:]
-    raise ValueError("заголовок не помещается в буфер")
+    raise ValueError("header does not fit in the buffer")
 
 
 def _is(h: fits.Header, name: str) -> bool:
@@ -271,7 +271,7 @@ def cutout_hdul(irsa_url: str) -> fits.HDUList:
     """
     parsed = parse_irsa_url(irsa_url)
     if parsed is None:
-        raise ValueError(f"не ссылка IRSA SPHEREx: {irsa_url}")
+        raise ValueError(f"not an IRSA SPHEREx URL: {irsa_url}")
     key, ra, dec, size = parsed
     url = BUCKET + key
     pool = _pool()

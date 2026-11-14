@@ -52,13 +52,13 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
     try:
         table = find_images(coord.ra.deg, coord.dec.deg, size_deg, offline=offline)  # кэш, потом архив
     except FileNotFoundError as e:
-        raise SkyUnavailable("Для этого места нет сохранённых данных (офлайн-режим).") from e
+        raise SkyUnavailable("No saved data for this sky position (offline mode).") from e
     except Exception as e:
-        raise SkyUnavailable(f"Архив IRSA не отвечает, а кэша для этого места нет: {e}") from e
+        raise SkyUnavailable(f"The IRSA archive is not responding and there is no cached data for this position: {e}") from e
 
     n_found = len(table)
     if n_found == 0:
-        raise SkyUnavailable("SPHEREx ещё не снимал это место (или его данных пока нет в архиве).")
+        raise SkyUnavailable("SPHEREx has not observed this position yet (or its data are not in the archive yet).")
     if detectors is not None:
         table = table[[d in detectors for d in table["detector"]]]
     if quick:
@@ -75,18 +75,18 @@ def get_sky(ra: float, dec: float, size_deg: float = 0.1, quick: bool = True, pe
             cutouts = load_cutouts(table, progress=verbose, offline=True)
             source = "cache"
         if len(cutouts) < len(table):
-            warnings.append(f"Загружено {len(cutouts)} из {len(table)} снимков "
-                            f"(архив не отдал часть данных).")
+            warnings.append(f"Loaded {len(cutouts)} of {len(table)} images "
+                            f"(the archive did not return some of the data).")
     if not cutouts:
-        raise SkyUnavailable("Не удалось загрузить ни одного снимка: архив недоступен, кэша нет.")
+        raise SkyUnavailable("Could not load any images: the archive is unavailable and there is no cache.")
 
     info: list[dict] = []
     frames = build_frames(cutouts, coord, size_deg, info=info, cadence=cadence)
     if not frames:
-        raise SkyUnavailable("Снимков слишком мало, чтобы собрать кадры.")
+        raise SkyUnavailable("Too few images to build frames.")
     by_det = frames_by_detector(frames)
     if all(len(v) < 2 for v in by_det.values()):
-        warnings.append("Есть только одна эпоха — мигать пока нечем.")
+        warnings.append("Only one epoch is available, so there is nothing to blink yet.")
 
     wcs, shape = make_target_wcs(coord, size_deg)
     return dict(
@@ -153,9 +153,9 @@ def analyze(sky: dict, online: bool = False, valid_detectors=None, coord=None) -
               else {"water": 0.0, "methane": 0.0, "co2": 0.0, "co": 0.0})
     card = who_is_it(coord, motion, scores, variability, online=online)
     if len(spec["wavelength"]) < 20:
-        card["molecule_badges"] = (["Звезда слишком яркая: ядро пересвечено, спектр недоступен"]
-                                   if variability.get("saturated") else ["Недостаточно точек спектра"])
+        card["molecule_badges"] = (["Star too bright: saturated core, spectrum unavailable"]
+                                   if variability.get("saturated") else ["Not enough spectrum points"])
     elif not spec_ok:
-        card["molecule_badges"] = [f"Сигнал слишком слабый для химии (S/N≈{snr:.1f})"]
+        card["molecule_badges"] = [f"Signal too weak for chemistry (S/N≈{snr:.1f})"]
     card["spectrum_snr"] = round(snr, 1)
     return dict(motion=motion, variability=variability, spectrum=spec, scores=scores, card=card)
