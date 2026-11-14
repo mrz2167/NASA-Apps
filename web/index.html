@@ -34,6 +34,10 @@ button{cursor:pointer}
 
 /* header */
 header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 0 0}
+.langsw{display:flex;gap:2px;margin-left:auto;border:1px solid var(--line);border-radius:999px;padding:2px}
+.langsw button{background:none;border:0;color:var(--muted);font:600 11px/1 inherit;letter-spacing:.06em;padding:6px 8px;border-radius:999px;cursor:pointer}
+.langsw button.on{background:var(--line);color:inherit}
+@media (max-width:520px){ header{gap:8px} .langsw button{padding:5px 5px;font-size:10px;letter-spacing:.02em} }
 .brand{display:flex;flex-direction:column;gap:2px;background:none;border:0;text-align:left}
 .wordmark{font-family:Unbounded,sans-serif;font-weight:700;font-size:24px;letter-spacing:.24em;line-height:1.1}
 .brand .label{font-size:10px;color:var(--muted)}
@@ -297,6 +301,9 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
       <span class="wordmark">LUMEN</span>
       <span class="label">Space Academy</span>
     </button>
+    <div class="langsw" id="langSw" role="group" aria-label="Language">
+      <button data-l="en">EN</button><button data-l="ru">RU</button><button data-l="uz">UZ</button>
+    </div>
     <button class="pill" id="pillBtn" title="Your star" style="color:inherit">
       <span id="pillStar"></span>
       <span class="pill-count" id="pillCount">0 / 10</span>
@@ -513,6 +520,48 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
 <div class="toasts" id="toasts"></div>
 
 <script>
+/* ---------- language (EN / RU / UZ) ----------
+   The page is written in English. For RU/UZ every text node and placeholder/title the page shows is looked
+   up in web/i18n/<lang>.json (key = the English text; numbers in a key are "#", filled back in order).
+   Anything without a translation stays in English. Works over http only (file:// stays English). */
+const I18N = (()=>{
+  let lang="en";
+  try{ lang=(new URLSearchParams(location.search).get("lang")||localStorage.getItem("lumen-lang")||"en").toLowerCase(); }catch(e){}
+  if(!["en","ru","uz"].includes(lang)) lang="en";
+  const NUM=/\d+(?:[.,]\d+)?/g, dict=new Map(), done=new WeakMap();
+  const tr = raw => {
+    const s=raw.replace(/\s+/g," ").trim(); if(!s) return null;
+    let t=dict.get(s);
+    if(t==null && /\d/.test(s)){ const nums=s.match(NUM)||[]; const p=dict.get(s.replace(NUM,"#")); if(p!=null){ let i=0; t=p.replace(/#/g,()=>nums[i++]??"#"); } }
+    if(t==null || t===s) return null;
+    const lead=raw.match(/^\s*/)[0], tail=raw.match(/\s*$/)[0];
+    return lead+t+tail;
+  };
+  const node = n => {
+    if(n.nodeType===3){
+      const p=n.parentNode; if(!p || /^(SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)) return;
+      if(done.get(n)===n.nodeValue) return;
+      const t=tr(n.nodeValue); if(t!=null) n.nodeValue=t; done.set(n,n.nodeValue); return;
+    }
+    if(n.nodeType!==1 || n.id==="langSw") return;
+    for(const a of ["placeholder","title","aria-label"]) if(n.hasAttribute(a)){ const t=tr(n.getAttribute(a)); if(t!=null) n.setAttribute(a,t); }
+    for(const c of n.childNodes) node(c);
+  };
+  const ready = lang==="en" || location.protocol==="file:" ? Promise.resolve() :
+    fetch("i18n/"+lang+".json").then(r=>r.ok?r.json():{}).then(d=>{ for(const k in d) if(d[k]) dict.set(k.replace(/\s+/g," ").trim(), d[k]); }).catch(()=>{});
+  const start = () => {
+    document.documentElement.lang=lang;
+    document.querySelectorAll("#langSw [data-l]").forEach(b=>{ b.classList.toggle("on", b.dataset.l===lang);
+      b.onclick=()=>{ try{ localStorage.setItem("lumen-lang", b.dataset.l); }catch(e){} const u=new URL(location.href); u.searchParams.delete("lang"); location.href=u.toString(); }; });
+    if(lang==="en") return;
+    ready.then(()=>{ if(!dict.size) return; node(document.body);
+      new MutationObserver(ms=>{ for(const m of ms){ if(m.type==="characterData") node(m.target); else if(m.type==="attributes") node(m.target); else m.addedNodes.forEach(node); } })
+        .observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:["placeholder","title","aria-label"]}); });
+  };
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", start); else start();
+  return { lang, tr: s => tr(s) ?? s, ready };
+})();
+
 /* =========================================================
    CONFIG — opened from our FastAPI server → uses the same origin.
    ?api=https://host — another server; ?api=demo — simulated sky.

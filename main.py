@@ -138,6 +138,14 @@ def favicon():
     return Response(FAVICON_SVG, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.get("/i18n/{name}", include_in_schema=False)
+def i18n_file(name: str):
+    """Interface translations (web/i18n/<lang>.json, key = the English text)."""
+    if name not in ("ru.json", "uz.json", "en.json") or not (WEB / "i18n" / name).is_file():
+        raise HTTPException(404, "No such file")
+    return FileResponse(WEB / "i18n" / name, media_type="application/json")
+
+
 @app.get("/levels/{name}", include_in_schema=False)
 def level_file(name: str):
     """Real frames for the training levels (make_training.py -> web/levels/)."""
