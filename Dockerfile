@@ -17,8 +17,10 @@ RUN pip install -r requirements.txt
 # код и сайт
 COPY *.py API.md ./
 COPY web/ web/
-# кэш пяти тестовых объектов: демо работает, даже если архив NASA недоступен
-COPY cache/ cache/
+# Кэш (запросы и вырезки SPHEREx) живёт на постоянном диске Railway, смонтированном в /app/cache:
+# в git его нет, сервер наполняет его сам при первых запросах и сохраняет между деплоями.
+# Локально: docker run -v "$PWD/cache:/app/cache" ...
+RUN mkdir -p cache
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \

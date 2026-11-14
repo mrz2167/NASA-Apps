@@ -232,14 +232,8 @@ def health():
     return {"ok": True, "cached_fields": len(_SKIES)}
 
 
-@app.get("/api/frames")
-def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
-           detector: int = Query(4, ge=1, le=6), mode: str = "blink"):
-    try:
-        sky = _load_sky(ra, dec, fov)
-    except SkyUnavailable as e:
-        raise HTTPException(503, str(e))
-
+def _det_items(sky: dict, detector: int) -> list:
+    """Кадры детектора в том порядке, в каком их показывает /api/frames (без шумных кадров)."""
     items = [(i, f) for i, f in enumerate(sky["frames"]) if f[1] == detector]
     if not items:
         raise HTTPException(404, f"Нет кадров детектора {detector}; есть: {sorted(sky['by_det'])}")
@@ -249,6 +243,30 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
         keep = n >= 0.25 * np.median(n)
         if keep.sum() >= 2:
             items = [it for it, k in zip(items, keep) if k]
+    return items
+
+
+def _track(sky: dict, imgs: list, coord: SkyCoord) -> list[dict]:
+    """Положение объекта у coord на каждом кадре (координаты фронтенда)."""
+    ny = sky["shape"][0]
+    x0, y0 = (float(v) for v in sky["wcs"].world_to_pixel(coord))
+    out = []
+    for im in imgs:
+        c = _centroid(im, x0, y0)
+        out.append(_to_display(*(c if c is not None else (x0, y0)), ny))
+    return out
+
+
+@app.get("/api/frames")
+def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
+           detector: int = Query(4, ge=1, le=6), mode: str = "blink"):
+    try:
+        sky = _load_sky(ra, dec, fov)
+    except SkyUnavailable as e:
+        raise HTTPException(503, str(e))
+
+    items = _det_items(sky, detector)
+    info = sky.get("info") or []
 
     imgs = [f[2] for _, f in items]
     dates = [f[0] for _, f in items]
@@ -267,12 +285,7 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
     out_diff = [{"label": lab, "png": _png_uri(_diff_rgb(d, lim))} for lab, d in zip(labels, diffs)]
 
     # объект в центре: положение на каждом кадре
-    ny = sky["shape"][0]
-    x0, y0 = (float(v) for v in sky["wcs"].world_to_pixel(sky["coord"]))
-    positions = []
-    for im in imgs:
-        c = _centroid(im, x0, y0)
-        positions.append(_to_display(*(c if c is not None else (x0, y0)), ny))
+    positions = _track(sky, imgs, sky["coord"])
 
     try:
         a = _analysis(sky, sky["coord"])
@@ -290,6 +303,24 @@ def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
         "meta": {"source": sky["source"], "n_images": sky["n_loaded"], "warnings": sky["warnings"],
                  "wavelength_um": [info[i]["wavelength_um"] for i, _ in items] if info else None},
     })
+
+
+@app.get("/api/track")
+def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
+          detector: int = Query(4, ge=1, le=6)):
+    """Путь выбранного объекта по кадрам поля (fra, fdec, fov, detector) — для «Trail» и линз.
+
+    ra, dec — куда кликнули; клик притягивается к ближайшему источнику.
+    positions идут в том же порядке, что frames в /api/frames с теми же параметрами.
+    """
+    try:
+        sky = _load_sky(fra, fdec, fov)
+    except SkyUnavailable as e:
+        raise HTTPException(503, str(e))
+    coord = _snap(sky, SkyCoord(ra, dec, unit="deg"))
+    imgs = [f[2] for _, f in _det_items(sky, detector)]
+    return {"ra": round(float(coord.ra.deg), 6), "dec": round(float(coord.dec.deg), 6),
+            "positions": _track(sky, imgs, coord)}
 
 
 _ANALYSES: "OrderedDict[tuple, dict]" = OrderedDict()

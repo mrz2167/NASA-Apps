@@ -15,10 +15,11 @@ pip install -r requirements.txt
 
 **https://nasa-skywatch-production.up.railway.app/** (Railway, проект `nasa-skywatch`)
 
-Передеплой из папки с `cache/` (кэш в git не входит, поэтому `--no-gitignore`; лишнее отсекает `.railwayignore`):
-```
-railway up --no-gitignore --ci
-```
+**Автодеплой:** сервис подключён к GitHub (`mrz2167/NASA-Apps`, ветка `main`) — каждый push в `main` сам собирается и выкатывается. Ход сборки: `railway logs --build` или дашборд Railway.
+
+Кэш лежит на постоянном диске Railway (volume, смонтирован в `/app/cache`), в git и в образ он не входит. Сервер дописывает туда новые места неба сам. Залить локальный кэш на диск: `railway volume files upload cache/<папка> --volume <имя>` (список: `railway volume list`).
+
+Ручной деплой текущей папки без push (для проверки): `railway up --ci`.
 
 ## Docker (рекомендуется)
 
@@ -27,9 +28,8 @@ docker compose up -d --build       # http://localhost:8077/
 docker compose logs -f             # логи
 docker compose down                # остановить
 ```
-- В образ запечён `cache/` пяти тестовых объектов (~200 МБ, образ ~1,7 ГБ): демо работает без архива NASA.
-- `docker-compose.yml` подключает `./cache` томом — новые места неба сохраняются между перезапусками.
-- Для хостинга (Railway/Render/Fly): тот же `Dockerfile`, порт берётся из `$PORT`. Перед сборкой положите `cache/` из архива на Drive.
+- `docker-compose.yml` подключает `./cache` томом — положите туда `cache/` из архива на Drive, чтобы демо открывалось мгновенно; новые места неба сохраняются между перезапусками. Без кэша всё скачивается из открытого бакета SPHEREx на AWS.
+- Для хостинга (Railway/Render/Fly): тот же `Dockerfile`, порт берётся из `$PORT`; `cache/` — постоянный диск, смонтированный в `/app/cache`.
 
 ## Запуск сайта целиком
 

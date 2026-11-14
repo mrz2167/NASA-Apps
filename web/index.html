@@ -994,6 +994,16 @@ function objPos(field, o, e){
   return {x:o.x0+o.motion[0]*k, y:o.y0-o.motion[1]*k};
 }
 const targetPos = (field, e) => objPos(field, field.target, e);
+// The object Trail and the lenses follow (real data): the one the user clicked, else the field's target.
+// While the clicked object's path is loading (or if it failed), stay on the click — never jump to the centre.
+function pathOf(field){
+  if(S.track) return S.track;
+  if(S.apiFrames && S.selected!=null && S.selected!=="target"){
+    const p = typeof S.selected==="object" ? S.selected : field.stars[S.selected];
+    if(p) return {positions:[{x:p.x, y:p.y}], pending:true};
+  }
+  return field.target;
+}
 function renderFrame(field, e, d){
   const N=field.N, img=new Float32Array(N*N), r=mulberry(field.seed+e*1013+d*71);
   const add=(x,y,f,sig=.8)=>{
@@ -1044,7 +1054,8 @@ function describe(field, which){
 const api = {
   async get(path, params){ const u=new URL(CONFIG.API_BASE+path); for(const k in params) u.searchParams.set(k, params[k]); const r=await fetch(u); if(!r.ok) throw new Error(r.status); return r.json(); },
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode}); },
-  object(ra,dec){ return this.get("/api/object",{ra,dec}); }
+  object(ra,dec){ return this.get("/api/object",{ra,dec}); },
+  track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det}); }
 };
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
 
@@ -1090,9 +1101,11 @@ function drawOverlays(){
     ctx.setLineDash([8,6]); ctx.strokeStyle="rgba(246,181,68,.8)"; ctx.lineWidth=2; ctx.strokeRect(a.x+1,a.y+1,b.x-a.x-2,b.y-a.y-2); ctx.restore();
   }
   // lens glow on the target (object-level lens: driven by its spectrum, not by pixels)
-  if(f.target && S.lens!=="none"){
-    const tp=targetPos(f,S.epoch), p=toCanvas(tp.x,tp.y);
-    const sc=f.target.mol[S.lens]||0, col=MOLS[S.lens].color, cl=f.target.cloud||1;
+  const tt=pathOf(f);
+  if(tt && S.lens!=="none"){
+    const tp=objPos(f,tt,S.epoch), p=toCanvas(tp.x,tp.y);
+    const mol = tt===f.target ? (tt.mol||{}) : (S.lastObj?.molecules||{});
+    const sc=mol[S.lens]||0, col=MOLS[S.lens].color, cl=(tt===f.target && tt.cloud)||1;
     ctx.save();
     if(sc>=SIGN){
       const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,px*4.5*cl);
@@ -1102,12 +1115,13 @@ function drawOverlays(){
       label(`${MOLS[S.lens].sym} SIGN ${sc.toFixed(2)}`, p.x+px*3, p.y-px*3, col);
     } else {
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
-      label(`NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
+      const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
+      label(checking ? `${MOLS[S.lens].sym} · checking…` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
     }
     ctx.restore();
   }
   if(S.mode==="trail"){
-    for(const o of [f.target, ...(f.extras||[])]){
+    for(const o of [tt, ...(f.extras||[])]){
       if(!o || o.moving===false) continue;
       const pts=Array.from({length:nE()},(_,e)=>{ const q=objPos(f,o,e); return toCanvas(q.x,q.y); });
       ctx.save(); ctx.strokeStyle="#E0352B"; ctx.lineWidth=2; ctx.shadowColor="#F07A3A"; ctx.shadowBlur=8;
@@ -1124,7 +1138,7 @@ function drawOverlays(){
     ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(22,px*3),0,7); ctx.stroke(); ctx.restore();
   }
   if(S.selected!=null){
-    const pos = S.selected==="target" ? targetPos(f,S.epoch) : S.selected.extra!=null ? objPos(f,f.extras[S.selected.extra],S.epoch) : (typeof S.selected==="object" ? S.selected : f.stars[S.selected]);
+    const pos = S.track ? objPos(f,S.track,S.epoch) : S.selected==="target" ? targetPos(f,S.epoch) : S.selected.extra!=null ? objPos(f,f.extras[S.selected.extra],S.epoch) : (typeof S.selected==="object" ? S.selected : f.stars[S.selected]);
     const p=toCanvas(pos.x,pos.y), r=Math.max(12,px*2.2);
     ctx.save(); ctx.strokeStyle="#F6B544"; ctx.lineWidth=2;
     for(const [sx,sy] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ ctx.beginPath(); ctx.moveTo(p.x+sx*r,p.y+sy*r*.45); ctx.lineTo(p.x+sx*r,p.y+sy*r); ctx.lineTo(p.x+sx*r*.45,p.y+sy*r); ctx.stroke(); }
@@ -1147,7 +1161,7 @@ function updateHud(){
 
 /* ---------- loading a field (cases & free) ---------- */
 async function scan(ra, dec, fov, key){
-  stop(); S.selected=null; S.ring=null; resetFile(); clearSpectrum();
+  stop(); S.selected=null; S.ring=null; S.track=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
   $("emptyState").style.display="none"; $("loading").classList.add("on");
   try{
@@ -1192,9 +1206,20 @@ bindSeg("detSeg","d", async d=>{
   S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range;
   track("detector",{val:+d});
   if(!S.field) return;
-  if(S.apiFrames){ $("loading").classList.add("on"); try{ await loadApiFrames(); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
+  if(S.apiFrames){ $("loading").classList.add("on"); try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
   draw();
 });
+
+// Ask the server where the clicked object sits on each frame of the current detector.
+async function followTrack(ra, dec){
+  const req = S.trackReq = (S.trackReq||0)+1;
+  try{
+    const t = await api.track(ra, dec, S.field, S.det);
+    if(req!==S.trackReq) return;              // a newer click or scan won
+    S.track = {positions:t.positions, ra:t.ra, dec:t.dec};
+    draw();
+  }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
+}
 
 /* ---------- selecting objects ---------- */
 function hitTest(gx, gy, rect){
@@ -1219,13 +1244,20 @@ canvas.addEventListener("click", async e=>{
   let pick = hit.kind==="target" ? "target" : hit.kind==="star" ? hit.i : null;
   if(pick==null && !S.apiFrames) return toast("Empty sky","Nothing bright enough there. Click right on a dot.");
   if(pick==null) pick={x:gx, y:gy};
-  S.selected=pick; draw();
+  S.selected=pick; S.lastObj=null;
+  const click = S.clickId = (S.clickId||0)+1;   // answers for an older click are ignored
   let obj;
   if(S.apiFrames){
     const N=S.field.N, ddec=(N/2-gy)*CONFIG.PIX_ARCSEC/3600, dra=-(gx-N/2)*CONFIG.PIX_ARCSEC/3600/Math.cos(S.field.dec*Math.PI/180);
-    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }catch(err){ return toast("Archive unreachable", err.message); }
-  } else obj=describe(S.field, pick);
-  S.lastObj=obj; renderFile(obj); renderSpectrum(obj);
+    // Trail and lenses follow the clicked object; clicking the field's own target goes back to it.
+    S.track=null;
+    if(pick==="target") S.trackReq=(S.trackReq||0)+1;
+    else followTrack(S.field.ra+dra, S.field.dec+ddec);
+    draw();
+    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }catch(err){ if(click===S.clickId) toast("Archive unreachable", err.message); return; }
+  } else { draw(); obj=describe(S.field, pick); }
+  if(click!==S.clickId) return;
+  S.lastObj=obj; renderFile(obj); renderSpectrum(obj); draw();
   if(obj.isTarget) track("selectTarget",{});
 });
 
@@ -1279,7 +1311,9 @@ function clearSpectrum(){ $("specSvg").innerHTML=`<text x="300" y="130" text-anc
 function renderSpectrum(o){
   const sp=o.spectrum; if(!sp) return clearSpectrum();
   const W=600,H=260,L=44,R=14,T=16,B=46, x=l=>L+(l-.75)/(5-.75)*(W-L-R);
-  const mx=Math.max(...sp.flux)*1.12||1, y=f=>T+(1-f/mx)*(H-T-B);
+  // Faint objects give negative fluxes (noise after background subtraction): the axis starts at 0,
+  // such points sit on it as hollow dots ("no light detected here") instead of falling below the chart.
+  const mx=Math.max(0,...sp.flux)*1.12||1, y=f=>T+(1-Math.max(0,f)/mx)*(H-T-B);
   let s="";
   for(const k in MOLS){ const on=S.lens===k; for(const [a,b] of MOLS[k].bands) s+=`<rect x="${x(a)}" y="${T}" width="${x(b)-x(a)}" height="${H-T-B}" fill="${MOLS[k].color}" opacity="${on?.32:.08}"/>`; if(on) s+=`<text x="${x(MOLS[k].bands.at(-1)[0])}" y="${T+12}" fill="${MOLS[k].color}" font-size="11" font-weight="700" font-family="Manrope">${MOLS[k].sym}</text>`; }
   s+=`<line x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}" stroke="rgba(243,238,228,.3)"/>`;
@@ -1288,7 +1322,8 @@ function renderSpectrum(o){
   dr.forEach(([a,b],i)=>{ s+=`<rect x="${x(a)}" y="${H-B+24}" width="${x(b)-x(a)-2}" height="4" rx="2" fill="${i+1===S.det && S.ctx!=="training"?"#F6B544":"rgba(243,238,228,.2)"}"/><text x="${(x(a)+x(b))/2}" y="${H-B+42}" fill="rgba(243,238,228,.45)" font-size="9" text-anchor="middle" font-family="Manrope">D${i+1}</text>`; });
   const pts=sp.wavelength.map((l,i)=>[x(l),y(sp.flux[i])]);
   s+=`<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="rgba(243,238,228,.35)" stroke-width="1"/>`;
-  pts.forEach((p,i)=>{ s+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.6" fill="#F3EEE4"><title>${sp.wavelength[i].toFixed(2)} µm · flux ${sp.flux[i].toFixed(3)}</title></circle>`; });
+  pts.forEach((p,i)=>{ const dark=sp.flux[i]<=0;
+    s+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.6" fill="${dark?"none":"#F3EEE4"}" stroke="${dark?"rgba(243,238,228,.45)":"none"}"><title>${sp.wavelength[i].toFixed(2)} µm · ${dark?"no light detected (below noise)":"flux "+sp.flux[i].toFixed(3)}</title></circle>`; });
   s+=`<text x="${L-8}" y="${T+8}" fill="rgba(243,238,228,.55)" font-size="10" text-anchor="end" font-family="Manrope">flux</text>`;
   $("specSvg").innerHTML=s; $("specLabel").textContent=o.name||"unidentified";
 }
