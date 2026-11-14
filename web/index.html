@@ -116,6 +116,14 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .checklist li i{flex:0 0 14px;height:14px;border-radius:50%;border:1px solid rgba(243,238,228,.35)}
 .checklist li.ok{color:var(--paper)}
 .checklist li.ok i{background:var(--amber);border-color:var(--amber);box-shadow:0 0 8px rgba(246,181,68,.7)}
+/* level won: shown in the task box, the viewer stays visible below */
+.win{margin-top:16px;display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;justify-content:space-between;padding:16px 18px;border:1px solid rgba(246,181,68,.45);border-radius:var(--radius);background:rgba(246,181,68,.08);animation:in .45s ease}
+.win-text{flex:1 1 320px;display:flex;flex-direction:column;gap:4px}
+.win-text .label{color:var(--amber)}
+.win-t{font-family:Unbounded,sans-serif;font-weight:400;font-size:18px}
+.win-x{font-size:13px;color:var(--muted)}
+.win-btn{flex:0 0 auto;animation:winGlow 1.8s ease-in-out infinite}
+@keyframes winGlow{0%,100%{box-shadow:0 0 0 0 rgba(246,181,68,.0)}50%{box-shadow:0 0 22px 2px rgba(246,181,68,.55)}}
 
 /* free exploration head */
 .banner{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:10px 16px;border:1px solid rgba(246,181,68,.35);border-radius:999px;font-size:13px;background:rgba(246,181,68,.06)}
@@ -129,6 +137,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
 .quick .label{font-size:10px;color:var(--muted);margin-right:4px}
 .chip{border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:12px;background:transparent;color:var(--muted)}
+.chip-surprise{border-color:rgba(246,181,68,.6);color:var(--amber)}
 .chip:hover,.chip.on{color:var(--paper);border-color:var(--paper)}
 .demo{margin-top:12px;font-size:12px;color:var(--amber);display:flex;gap:8px;align-items:center}
 .demo i{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 10px var(--amber)}
@@ -160,6 +169,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .plate.is-new{border-color:var(--amber);box-shadow:0 0 0 1px rgba(246,181,68,.35),0 0 30px -8px rgba(246,181,68,.6)}
 .plate .new{display:none;position:absolute;top:-9px;left:10px;font-size:9px;font-weight:700;letter-spacing:.18em;padding:2px 7px;border-radius:999px;background:var(--amber);color:var(--night)}
 .plate.is-new .new{display:block}
+.wise-btn{padding:7px 14px;font-size:12px;text-decoration:none}
 .plate .tip{flex-basis:100%;font-size:12px;color:var(--amber);order:-1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
 .seg button{border:0;background:transparent;color:var(--muted);padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600}
@@ -244,6 +254,14 @@ input[type=range]{accent-color:var(--amber);width:160px}
 .name-in{display:flex;flex-direction:column;gap:6px;margin:6px 0 12px}
 .name-in input{background:rgba(243,238,228,.06);border:1px solid var(--line);border-radius:10px;padding:11px 12px;outline:none}
 .name-in input:focus{border-color:var(--amber)}
+.name-in .label{font-size:10px;color:var(--muted)}
+.send{margin-top:16px;padding:14px 16px;border:1px solid rgba(246,181,68,.35);border-radius:var(--radius);background:rgba(246,181,68,.05)}
+.send-hint{font-size:13px;margin:4px 0 6px}
+.send-row{display:flex;flex-wrap:wrap;gap:0 12px}
+.send-row .name-in{flex:1 1 160px}
+.send-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.send-status{font-size:13px;color:var(--muted)}
+.send-status.ok{color:var(--amber)}
 .toasts{position:fixed;right:18px;bottom:18px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px}
 .toast{background:var(--paper);color:var(--ink);border-radius:12px;padding:12px 14px;font-size:13px;box-shadow:0 14px 40px -10px rgba(0,0,0,.6);animation:in .35s ease}
 .toast b{display:block;font-family:Unbounded,sans-serif;font-weight:400;font-size:12px;color:var(--red);letter-spacing:.06em}
@@ -361,6 +379,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           <div class="empty" id="emptyState">
             <div class="display">Pick a patch of sky.</div>
             <div>Enter coordinates, or tap one of the ready-made patches above.</div>
+            <button class="btn btn-amber" id="surpriseBig">🎲 Surprise me</button>
           </div>
           <div class="loading" id="loading">Pulling frames from the archive…</div>
         </div>
@@ -401,6 +420,11 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <span class="label ctl-label">Detector</span>
             <div class="seg" id="detSeg"></div>
             <span class="det-hint" id="detHint"></span>
+          </div>
+          <div class="plate" data-tool="wise">
+            <span class="label ctl-label">Older sky</span>
+            <a class="btn btn-ghost wise-btn" id="wiseLink" href="http://byw.tools/wiseview" target="_blank" rel="noopener">Open in WiseView ↗</a>
+            <span class="det-hint">WISE 2010–2024: 14 more years of motion</span>
           </div>
         </div>
         <div class="simnote" id="simNote" hidden></div>
@@ -457,6 +481,16 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
     <div class="display">File what you found.</div>
     <p>A card for your channel, and a link that opens this exact patch of sky. Signs, not proof — and that's how real discoveries start.</p>
     <img id="reportImg" class="report-preview" alt="Field report card">
+    <div class="send" id="sendBox" hidden>
+      <div class="label" style="color:var(--amber)">Send to your class</div>
+      <p class="send-hint">Your teacher sees every report from your class in one table: who found what, and where.</p>
+      <div class="send-row">
+        <label class="name-in"><span class="label">Your name</span><input id="repName" maxlength="40" placeholder="First name is enough"></label>
+        <label class="name-in"><span class="label">Class code</span><input id="repClass" maxlength="24" placeholder="From your teacher"></label>
+      </div>
+      <label class="name-in"><span class="label">Note (optional)</span><input id="repNote" maxlength="300" placeholder="What did you notice?"></label>
+      <div class="send-actions"><button class="btn btn-amber" id="sendReport">Send to class</button><span class="send-status" id="sendStatus" role="status"></span></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="dlReport">Download card</button>
       <button class="btn btn-ghost" id="copyLink">Copy sky link</button>
@@ -530,7 +564,7 @@ const TARGETS = {
 
 /* ---------- the 10 levels ---------- */
 const TOOL_ORDER = ["play","mode","epoch","lens","who"];
-const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det"];
+const ALL_TOOLS = ["play","mode","epoch","lens","who","zoom","det","wise"];
 
 const LEVELS = [
   {n:1, title:"The Power of the Blink",
@@ -609,6 +643,69 @@ const PATCHES = [
   // young star in Ophiuchus behind an edge-on icy disk: SPHEREx spectrum dips at 4.3 µm (CO₂ ice) and 4.6 µm (CO ice)
   {name:"CRBR 2422.8 · icy protostar (CO₂, CO)", ra:246.8525, dec:-24.6842, key:null}
 ];
+
+// "Surprise me": fields where something interesting happens. Positions are SIMBAD's, moved by proper motion
+// to 2025.9 (the middle of the SPHEREx data), so fast movers sit in the middle of the field; every field has
+// 224–860 SPHEREx exposures over at least two sky passes (checked against IRSA, Nov 2026).
+const SURPRISES = [
+  {name:"Luhman 16", about:"third-closest system to the Sun", kind:"bd", ra:162.29548, dec:-53.3169, pm:2.79},
+  {name:"UGPS 0722−0540", about:"a cold T9 brown dwarf", kind:"bd", ra:110.60974, dec:-5.67346, pm:0.97},
+  {name:"2MASS 0559−1404", about:"bright T dwarf", kind:"bd", ra:89.83418, dec:-14.08277, pm:0.66},
+  {name:"2MASS 0415−0935", about:"a T8 brown dwarf", kind:"bd", ra:63.84743, dec:-9.5814, pm:2.26},
+  {name:"Gliese 229 B", about:"the first T dwarf ever found", kind:"bd", ra:92.64394, dec:-21.8718, pm:0.73},
+  {name:"Gliese 570 D", about:"a T7.5 companion", kind:"bd", ra:224.32036, dec:-21.37533, pm:1.97},
+  {name:"Ross 458 C", about:"a T8 companion", kind:"bd", ra:195.17063, dec:12.35394, pm:0.64},
+  {name:"WISE 1541−2250", about:"a Y dwarf", kind:"bd", ra:235.46082, dec:-22.84085, pm:0.91},
+  {name:"WISE 0350−5658", about:"a Y dwarf", kind:"bd", ra:57.49973, dec:-56.97754, pm:0.61},
+  {name:"WISE 0535−7500", about:"a Y dwarf", kind:"bd", ra:83.81794, dec:-75.00666, pm:0.12},
+  {name:"2MASS 1217−0311", about:"a T7.5 dwarf", kind:"bd", ra:184.28867, dec:-3.18645, pm:1.06},
+  {name:"2MASS 0939−2448", about:"a cold T8 pair", kind:"bd", ra:144.9023, dec:-24.81518, pm:1.17},
+  {name:"Kapteyn's Star", about:"8.7″ a year", kind:"fast", ra:77.98521, dec:-45.0595, pm:8.64},
+  {name:"Groombridge 1830", about:"7″ a year", kind:"fast", ra:178.28126, dec:37.67683, pm:7.06},
+  {name:"Lacaille 9352", about:"6.9″ a year", kind:"fast", ra:346.52687, dec:-35.8435, pm:6.9},
+  {name:"Wolf 359", about:"a nearby red dwarf on the move", kind:"fast", ra:164.09248, dec:6.9953, pm:4.72},
+  {name:"Ross 128", about:"a quiet red dwarf next door", kind:"fast", ra:176.93936, dec:0.79576, pm:1.37},
+  {name:"Teegarden's Star", about:"a tiny, fast red dwarf", kind:"fast", ra:43.2795, dec:16.85391, pm:5.12},
+  {name:"van Maanen's Star", about:"a fast white dwarf", kind:"fast", ra:12.30014, dec:5.3691, pm:2.98},
+  {name:"Luyten's Star", about:"3.7″ a year", kind:"fast", ra:111.85621, dec:5.19923, pm:3.74},
+  {name:"Kruger 60", about:"a red-dwarf pair", kind:"fast", ra:336.98839, dec:57.69341, pm:0.76},
+  {name:"GJ 1061", about:"a close red dwarf", kind:"fast", ra:54.00627, dec:-44.51539, pm:0.83},
+  {name:"SCR 1845−6357", about:"red dwarf with a brown-dwarf partner", kind:"fast", ra:281.31422, dec:-63.95895, pm:2.65},
+  {name:"Proxima Centauri", about:"the closest star", kind:"fast", ra:217.36967, dec:-62.67395, pm:3.86},
+  {name:"Lalande 21185", about:"4.5″ a year", kind:"fast", ra:166.32534, dec:43.53353, pm:4.51},
+  {name:"GJ 1002", about:"a faint, fast red dwarf", kind:"fast", ra:1.6741, dec:-7.55168, pm:2.06},
+  {name:"Chi Cygni", about:"a giant that brightens 10 000×", kind:"var", ra:297.64113, dec:32.91375, pm:0.05},
+  {name:"T Tauri", about:"a newborn star that flickers", kind:"var", ra:65.49772, dec:19.53502, pm:0.02},
+  {name:"R Leonis", about:"a pulsating red giant", kind:"var", ra:146.88956, dec:11.42846, pm:0.05},
+  {name:"Mira", about:"the original pulsating giant", kind:"var", ra:34.8367, dec:-2.97935, pm:0.24},
+  {name:"Barnard's Star", about:"the fastest star in our sky", kind:"fast", ra:TARGETS.barnard.ra, dec:TARGETS.barnard.dec, pm:10.39, key:"barnard"},
+  {name:"WISE 0855−0714", about:"the coldest brown dwarf known", kind:"bd", ra:TARGETS.wise0855.ra, dec:TARGETS.wise0855.dec, pm:8.1, key:"wise0855"},
+  {name:"Epsilon Indi B", about:"a pair of brown dwarfs next door", kind:"bd", ra:TARGETS.epsindib.ra, dec:TARGETS.epsindib.dec, pm:4.7, key:"epsindib"},
+  {name:"RW Aurigae", about:"a young star that dims and flares", kind:"var", ra:TARGETS.rwaur.ra, dec:TARGETS.rwaur.dec, pm:0, key:"rwaur"},
+  {name:"R Draconis", about:"a pulsating red giant", kind:"var", ra:TARGETS.rdra.ra, dec:TARGETS.rdra.dec, pm:0, key:"rdra"}
+];
+const SURPRISE_TIP = {
+  bd:   "A failed star, too cold to shine. Look with Detector 5 or 6, where it's brightest, then try the Water and Methane lenses.",
+  fast: "It's in the middle. Play the blink and watch it jump, then switch to Trail to draw its path.",
+  var:  "It's in the middle. Step through the frames: its brightness changes while its position stays put."
+};
+// Shuffle bag: every field once before any repeats.
+function surprise(){
+  if(S.ctx!=="free") startFree();
+  if(!S.surpriseBag || !S.surpriseBag.length){
+    S.surpriseBag = SURPRISES.map((_,i)=>i).sort(()=>Math.random()-.5);
+    if(S.surpriseBag[0]===S.surpriseLast && S.surpriseBag.length>1) S.surpriseBag.push(S.surpriseBag.shift());
+  }
+  const i=S.surpriseBag.shift(), o=SURPRISES[i]; S.surpriseLast=i;
+  const kind={bd:"Brown dwarf",fast:"Fast-moving star",var:"Variable star"}[o.kind];
+  $("raIn").value=o.ra; $("decIn").value=o.dec;
+  $("taskT").textContent="Surprise: "+o.name;
+  $("taskTeach").textContent=`${kind} · ${o.about}${o.pm>=1?` · moves ${o.pm.toFixed(1)}″ a year`:""}. ${SURPRISE_TIP[o.kind]}`;
+  scan(o.ra, o.dec, +$("fovIn").value, o.key||null);
+}
+function freeTitle(){
+  $("taskT").textContent="Your own patch of sky"; $("taskTeach").textContent="Pick a ready-made patch or type coordinates. Find something that moves. If no catalogue knows its name, file a report.";
+}
 
 const RANKS = [[0,"Cadet"],[100,"Observer"],[250,"Hunter"],[650,"Explorer"],[1250,"Pathfinder"]];
 const XP_FOR = n => n<=5 ? 50 : 200;
@@ -908,6 +1005,30 @@ function completeLevel(n){
   renderProgress();
   const after=rankFor(xpTotal()).name;
   if(first && after!==before) setTimeout(()=>toast("Promotion", `You're now ${/^[AEIOU]/i.test(after)?"an":"a"} ${after}.`), 1600);
+  showWin(n, first);
+}
+
+// The level is won: say so in the task box above the viewer, and leave the viewer on screen so the
+// player sees what they just did. The star celebration opens only when they ask for it.
+function showWin(n, first){
+  const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
+  const kicker = (n<=5 ? `Training ${n} of 5` : `Case ${n-5} of 5`) + " complete" + (first ? ` · +${XP_FOR(n)} XP` : "");
+  say("");
+  $("hintBtn").hidden=true; $("hintRow").hidden=true;
+  const keep = S.ctx==="case" ? ($("taskExtra").querySelector(".checklist")?.outerHTML||"") : "";   // all steps ticked
+  $("taskExtra").innerHTML = keep + `<div class="win" role="status">
+      <div class="win-text"><span class="label">✓ ${kicker}</span><b class="win-t"></b><p class="win-x"></p></div>
+      <button class="btn btn-amber win-btn" id="winBtn">★ ${first ? "Collect your star" : "See your star"}</button>
+    </div>`;
+  $("taskExtra").querySelector(".win-t").textContent = L.t;
+  $("taskExtra").querySelector(".win-x").textContent = L.x;
+  $("winBtn").onclick = ()=>openFound(n, first);
+  if(S.field && !S.playing) play();   // keep the found object blinking under the card
+  const box=$("taskBox").getBoundingClientRect();
+  if(box.top<0 || box.bottom>innerHeight) $("taskBox").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function openFound(n, first){
   const L = n<=5 ? LEVELS[n-1].found : {t:CASES[n-6].title+" — closed", x:CASES[n-6].closing};
   const animStar = first && n!==5;   // level 5: the “Training complete” screen lights the fifth point
   $("foundStarBox").hidden = n===5 && first;
@@ -973,11 +1094,12 @@ function startFree(scanArgs){
   show("play"); resetViewerState();
   $("freeHead").hidden=false; $("newHere").hidden = trainingDone();
   $("crumb").innerHTML=`<b>Free exploration</b>`;
-  $("taskT").textContent="Your own patch of sky"; $("taskTeach").textContent="Pick a ready-made patch or type coordinates. Find something that moves. If no catalogue knows its name, file a report.";
+  freeTitle();
   $("dyk").hidden=true;
   setTools(ALL_TOOLS);
-  $("quick").innerHTML=`<span class="label">Try</span>`+PATCHES.map((p,i)=>`<button class="chip" data-p="${i}">${p.name}</button>`).join("");
-  $("quick").querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{ const p=PATCHES[+b.dataset.p]; $("raIn").value=p.ra; $("decIn").value=p.dec; scan(p.ra,p.dec,+$("fovIn").value,p.key); });
+  $("quick").innerHTML=`<span class="label">Try</span><button class="chip chip-surprise" id="surpriseChip">🎲 Surprise me</button>`+PATCHES.map((p,i)=>`<button class="chip" data-p="${i}">${p.name}</button>`).join("");
+  $("surpriseChip").onclick=surprise;
+  $("quick").querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{ const p=PATCHES[+b.dataset.p]; $("raIn").value=p.ra; $("decIn").value=p.dec; freeTitle(); scan(p.ra,p.dec,+$("fovIn").value,p.key); });
   if(scanArgs) scan(...scanArgs);
   else { S.field=null; $("emptyState").style.display=""; const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—"; }
 }
@@ -1085,9 +1207,25 @@ const api = {
   frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence,source:S.survey}); },
   object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
-  lens(f){ return this.get("/api/lens",{ra:f.ra,dec:f.dec,fov:f.fov}); },
+  lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
   track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence,source:S.survey,frame:S.epoch}); }
 };
+// WiseView (byw.tools, AMNH): the same spot in WISE/NEOWISE images, 2010–2024. Centred on the clicked
+// object if there is one, otherwise on the field; settings as WiseView's own defaults (W2, inverted).
+function wiseviewUrl(){
+  const f=S.field; if(!f) return "http://byw.tools/wiseview";
+  const o=S.track ? {ra:S.track.ra, dec:S.track.dec} : (S.selSky || {ra:f.ra, dec:f.dec});
+  const size = S.track || S.selSky ? 176 : Math.min(600, Math.round(f.fov*3600));
+  return "http://byw.tools/wiseview#ra="+o.ra.toFixed(6)+"&dec="+o.dec.toFixed(6)+"&size="+size+
+    "&band=2&speed=698.16&minbright=2.2488&maxbright=500.0000&window=1.06038&diff_window=1&linear=1&color=&zoom=7"+
+    "&border=0&gaia=0&invert=1&maxdyr=0&scandir=0&neowise=0&diff=0&outer_epochs=0&unique_window=1&smooth_scan=0"+
+    "&shift=0&pmra=0&pmdec=0&synth_a=0&synth_b=0";
+}
+$("wiseLink").addEventListener("click", e=>{
+  if(!S.field){ e.preventDefault(); return toast("No sky yet","Open a patch of sky first."); }
+  e.currentTarget.href=wiseviewUrl();
+});
+$("surpriseBig").onclick=()=>surprise();
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
 
 /* ---------- drawing ---------- */
@@ -1247,7 +1385,7 @@ function updateHud(){
 
 /* ---------- loading a field (cases & free) ---------- */
 async function scan(ra, dec, fov, key){
-  stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
+  stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.lensPending=[]; S.selSky=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
   $("emptyState").style.display="none"; $("loading").classList.add("on");
   try{
@@ -1334,6 +1472,20 @@ async function ensureLens(){
   }catch(e){ if(S.field===f) toast("Lens map unavailable", e.message); }
   if(S.lensLoading===f) S.lensLoading=null;
   if(S.field===f) draw();
+  // objects clicked before the map was ready
+  const pend=(S.lensPending||[]).filter(o=>o.f===f); S.lensPending=[];
+  for(const o of pend) await lensPaint(f, o);
+}
+// Ask the server to colour a clicked object by its spectrum. The paint is kept for the field,
+// so it stays when the user clicks something else.
+async function lensPaint(f, o){
+  if(!S.apiFrames || !f || !o) return;
+  if(S.lensMaps?.field!==f){ (S.lensPending=S.lensPending||[]).push({f, ra:o.ra, dec:o.dec}); return; }
+  try{
+    const d=await api.lens(f, o), imgs={};
+    for(const k in d.maps) imgs[k]=await loadImg(d.maps[k]);
+    if(S.field===f){ S.lensMaps={field:f, imgs, peak:d.peak, lit:d.lit}; draw(); }
+  }catch(e){ /* the object glow still shows its signs */ }
 }
 bindSeg("lensSeg","l", l=>{ S.lens=l; if(l!=="none") ensureLens(); if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
 $("detSeg").innerHTML = DETECTORS.map(d=>`<button data-d="${d.id}" class="${d.id===S.det?"on":""}">D${d.id}</button>`).join("");
@@ -1417,10 +1569,16 @@ canvas.addEventListener("click", async e=>{
     if(pick==="target") S.trackReq=(S.trackReq||0)+1;
     else followTrack(S.field.ra+dra, S.field.dec+ddec);
     draw();
+    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // for the WiseView link
     fileStatus("Checking…", "Looking up how it moves, how it flickers and what it's made of.", true);
+    // the first click on a new patch of sky reads every exposure there: say so instead of looking stuck
+    const slow=setTimeout(()=>{ if(click===S.clickId) fileStatus("Calculating spectrum…", "First look at this patch of sky: we're reading every SPHEREx exposure of it. This can take up to a minute.", true); }, 6000);
     try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }
     catch(err){ if(click===S.clickId){ fileStatus("No answer", "The archive didn't reply ("+esc(err.message)+"). Tap the dot again."); toast("Archive unreachable", "Tap the dot again."); } return; }
-  } else { draw(); obj=describe(S.field, pick); }
+    finally{ clearTimeout(slow); }
+    // colour the clicked object on the lens map by its own spectrum (it may be too faint for the per-pixel map)
+    if(pick!=="target" && Object.values(obj.molecules||{}).some(v=>v>0)) lensPaint(S.field, S.selSky);
+  } else { S.selSky=null; draw(); obj=describe(S.field, pick); }   // simulated stars have no real coordinates
   if(click!==S.clickId) return;
   S.lastObj=obj; renderFile(obj); renderSpectrum(obj); draw(); revealFile();
   if(obj.isTarget) track("selectTarget",{});
@@ -1527,12 +1685,45 @@ async function openReport(o){
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;
   $("copyLink").hidden = !!train;
+  // shared class table: candidates from free exploration and from Level 5 (needs the real backend)
+  S.reportObj=o;
+  const canSend = !!CONFIG.API_BASE && (S.ctx==="free" || (S.ctx==="training" && S.level===5));
+  $("sendBox").hidden=!canSend;
+  if(canSend){
+    $("repName").value=P.name||""; $("repClass").value=P.classCode||""; $("repNote").value="";
+    $("sendStatus").textContent=""; $("sendStatus").className="send-status"; $("sendReport").disabled=false;
+  }
   $("reportModal").classList.add("on");
   if(S.ctx==="training" && S.level===5){
-    if(S.tr.marked){ S.tr.reported=true; renderChecklist(); checkL5(); if(S.tr.checked.target && S.tr.checked.extra) setTimeout(()=>$("reportModal").classList.remove("on"), 900); }
+    if(S.tr.marked){ S.tr.reported=true; renderChecklist(); checkL5(); }
     else say("First check both movers and mark the candidate, then file the report.");
   }
 }
+$("sendReport").onclick=async()=>{
+  const o=S.reportObj; if(!o) return;
+  const name=$("repName").value.trim(), code=$("repClass").value.trim();
+  if(!name) { $("repName").focus(); return setSend("Type your name so your teacher knows who found it."); }
+  if(!code) { $("repClass").focus(); return setSend("Type the class code your teacher gave you."); }
+  P.name=name; P.classCode=code; if(!P.client) P.client=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()); save();
+  const train=S.ctx==="training", f=S.field, at=S.track ? {ra:S.track.ra, dec:S.track.dec} : S.selSky;
+  const m=o.motion||{};
+  const body={client:P.client, name, class_code:code, source:train?"level5":"free",
+    ra:train?null:at?.ra??null, dec:train?null:at?.dec??null,
+    field_ra:train?null:f?.ra??null, field_dec:train?null:f?.dec??null, fov:train?null:f?.fov??null,
+    object_name:o.name||(train?"Training candidate":null), status:["known","candidate","star"].includes(o.status)?o.status:"candidate",
+    verdict:verdict(o)[0], motion:m.arcsec_per_yr??null, motion_err:m.arcsec_per_yr_err??null, pa:m.pa_deg??null,
+    catalog_motion:m.catalog_arcsec_per_yr??null, variability:o.variability?.ratio??null, molecules:o.molecules||{},
+    detector:train?null:S.det, cadence:train?null:S.cadence, note:$("repNote").value.trim()};
+  if(body.ra!=null) body.ra=((body.ra%360)+360)%360;
+  $("sendReport").disabled=true; setSend("Sending…");
+  try{
+    const r=await fetch(CONFIG.API_BASE+"/api/reports",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(typeof d.detail==="string"?d.detail:"error "+r.status);
+    setSend(d.duplicate?`Already in class ${d.class_code}'s table (report #${d.id}). Name and note updated.`:`Sent ✓ Report #${d.id} is in class ${d.class_code}'s table.`, true);
+  }catch(e){ $("sendReport").disabled=false; setSend("Couldn't send: "+e.message); }
+};
+function setSend(t, ok=false){ $("sendStatus").textContent=t; $("sendStatus").className="send-status"+(ok?" ok":""); }
 $("dlReport").onclick=()=>{ const a=document.createElement("a"); a.href=S.reportUrl; a.download="lumen-field-report.png"; a.click(); };
 $("copyLink").onclick=async()=>{ try{ await navigator.clipboard.writeText(location.href); toast("Link copied","Anyone who opens it lands on this exact patch of sky."); }catch(e){ toast("Copy this link", location.href); } };
 
@@ -1585,6 +1776,7 @@ $("searchForm").onsubmit=e=>{
   const ra=parseRA($("raIn").value), dec=parseDec($("decIn").value), fov=+$("fovIn").value;
   if(!isFinite(ra)||!isFinite(dec)||ra<0||ra>=360||dec<-90||dec>90) return toast("Check the coordinates","RA 0–360° or hh mm ss; Dec −90…+90° or ±dd mm ss.");
   const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;
+  if(S.ctx==="free") freeTitle();
   scan(ra,dec,fov,key);
 };
 $("startBtn").onclick=()=>{ const n=nextLevel(); if(!n) return openCert(); startLevel(n); };

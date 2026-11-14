@@ -225,4 +225,7 @@ scratch/
 *.zip
 logs/
 test_pipeline.py
+
+
 .claude/worktrees/
+data/
