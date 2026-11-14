@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LUMEN Space Academy</title>
-<meta name="description" content="Complete 10 quests and find your first objects in deep space. Real images from NASA's SPHEREx telescope. No astronomy knowledge needed.">
+<meta name="description" content="Complete 10 quests and find your first objects in deep space. Train on a simulated sky, then solve cases in real images from NASA's SPHEREx telescope. No astronomy knowledge needed.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230B1030'/%3E%3Cpath d='M32 8l6.5 17.5L56 32l-17.5 6.5L32 56l-6.5-17.5L8 32l17.5-6.5z' fill='%23F6B544'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Unbounded:wght@200;400;700&display=swap" rel="stylesheet">
@@ -309,12 +310,12 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
       <div>
         <span class="label tag">NASA Space Apps 2026</span>
         <h1 class="display">Complete <b>10 quests</b> and find your first objects in deep space</h1>
-        <p class="sub">Real images from NASA's SPHEREx telescope. No astronomy knowledge needed.</p>
+        <p class="sub">Train on a simulated sky, then solve cases and explore freely in real images from NASA's SPHEREx telescope. No astronomy knowledge needed.</p>
         <div class="cta">
           <button class="btn btn-amber btn-lg" id="startBtn">Start the game</button>
           <button class="btn btn-ghost btn-lg" id="freeBtn">Free exploration</button>
         </div>
-        <div class="gray">Images from NASA's SPHEREx telescope · training takes about 10 minutes</div>
+        <div class="gray">Training (simulated sky) takes about 10 minutes · cases and free exploration use real SPHEREx images</div>
       </div>
       <div class="map">
         <div id="mapStar"></div>
@@ -408,7 +409,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           </div>
           <div class="plate" data-tool="det" id="cadPlate">
             <span class="label ctl-label">Frames</span>
-            <div class="seg" id="cadSeg"><button data-c="pass" class="on">Every 6 months</button><button data-c="visit">Every visit</button></div>
+            <div class="seg" id="cadSeg"><button data-c="pass" class="on">Every sky pass</button><button data-c="visit">Every visit</button></div>
             <span class="det-hint" id="cadHint">one frame per sky pass</span>
           </div>
           <div class="plate" data-tool="det">
@@ -597,7 +598,7 @@ const LEVELS = [
 /* Advanced cases (levels 6–10). Did-you-know texts are drafts — review before submission. */
 const CASES = [
   {id:"c1", level:6, target:"barnard", title:"The Runaway Star",
-   brief:"The fastest-moving star in our sky is crossing it in plain view. Six months between photographs, and it still won't sit still.",
+   brief:"The fastest-moving star in our sky is crossing it in plain view. Photographs taken weeks to months apart, and it still won't sit still.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"play",t:"Pause the blink and watch the star jump",ev:"play"},
           {id:"zoom",t:"Zoom to 4×: the move is only a few pixels",ev:"zoom",val:4},{id:"trail",t:"Switch to Trail to draw its path",ev:"mode",val:"trail"},
           {id:"sel",t:"Click the star to open its file",ev:"selectTarget"}],
@@ -609,13 +610,13 @@ const CASES = [
           {id:"d6",t:"Now Detector 6 (4.42–5.00 µm)",ev:"detector",val:6},{id:"ch4",t:"Turn on the Methane lens",ev:"lens",val:"methane"},
           {id:"sel",t:"Open its file and read the spectrum",ev:"selectTarget"}],
    closing:"Invisible in one colour, bright in another, with a methane dip. That's how cold brown dwarfs give themselves away.",
-   fact:"WISE 0855−0714 is the coldest brown dwarf known, below the freezing point of water. Kevin Luhman, who later found Luhman 16, discovered it in 2014 by its motion in WISE images."},
+   fact:"WISE 0855−0714 is the coldest brown dwarf known, below the freezing point of water. Kevin Luhman discovered it in 2014, a year after finding Luhman 16, by its motion in WISE images."},
   {id:"c3", level:8, target:"epsindib", title:"Twins Too Close To Split",
    brief:"Two brown dwarfs orbit each other far closer than one SPHEREx pixel. You will never see two dots. Prove they're cold anyway.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"zoom",t:"Zoom in as far as you can",ev:"zoom",val:4},
           {id:"sel",t:"Open the object's file",ev:"selectTarget"},{id:"h2o",t:"Check it with the Water lens",ev:"lens",val:"water"}],
    closing:"Some mysteries you solve with chemistry, not eyesight. One dot, two cold worlds.",
-   fact:"Epsilon Indi B was discovered in 2003, about 12 light-years from us. A year later sharper telescopes showed it is really two brown dwarfs orbiting each other."},
+   fact:"Epsilon Indi B was discovered in early 2003, about 12 light-years from us. Later that same year sharper images from ESO's Very Large Telescope showed it is really two brown dwarfs orbiting each other."},
   {id:"c4", level:9, target:"rwaur", title:"The Breathing Star",
    brief:"This one doesn't travel. It flickers — a young star still wrapped in the dust it was born from. Find the change without the motion.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"diff",t:"Switch to What changed",ev:"mode",val:"diff"},
@@ -1500,7 +1501,7 @@ async function followTrack(ra, dec){
   }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
 }
 
-// Frames: one per six-month sky pass, or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
+// Frames: one per sky pass (passes are weeks to months apart, not a fixed spacing), or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
 bindSeg("cadSeg","c", async c=>{
   S.cadence=c; track("cadence",{val:c});
   $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
@@ -1560,10 +1561,17 @@ canvas.addEventListener("click", async e=>{
 
 /* ---------- crew file card ---------- */
 function isMoving(o){ const m=o.motion||{}; return typeof m.significant==="boolean" ? m.significant : (m.arcsec_per_yr||0)>=2; }
+// A still source with no catalogue match is not a discovery. The server flags "too faint" in variability.label
+// ("Объект слишком тусклый" / "Недостаточно данных") and leaves the motion error empty when nothing could be measured.
+function isUnmatchedStar(o){ return o.status==="star" && !o.catalog; }
+function isFaint(o){ return isUnmatchedStar(o) && (/тускл|недостаточно|faint|not enough/i.test(o.variability?.label||"") || o.motion?.arcsec_per_yr_err==null); }
+function objTitle(o, train){ if(o.name) return o.name; if(o.status==="star") return isFaint(o)?"Nothing measurable here":"Faint background source"; return train?"Training candidate":"Unidentified mover"; }
 function verdict(o){
   if(o.vtext) return o.vtext;
   const mv=isMoving(o), m=o.molecules||{}, vr=o.variability?.ratio||1;
   if(vr>=1.5 && !mv) return ["Variable star","Brightness changes, position steady."];
+  if(isFaint(o)) return ["Nothing measurable here","Too faint to measure its motion or spectrum. Try a brighter dot."];
+  if(isUnmatchedStar(o)) return ["Faint background source","Steady and still, too faint for the catalogues. Not a discovery: discoveries move or change."];
   if(mv && m.methane>=SIGN) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
   if(mv && m.water>=.3) return ["Possibly a brown dwarf","Moves, with a strong water dip. Worth a closer look."];
   if(mv) return ["Nearby star on the move","High proper motion, no cold-world chemistry."];
@@ -1573,7 +1581,7 @@ function compass(pa){ if(pa==null) return ""; const dirs=["N","NE","E","SE","S",
 function renderFile(o){
   const [vt,vs]=verdict(o);
   const marked = S.ctx==="training" && S.tr.marked && o.status==="candidate";
-  const statusTxt={known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:"CATALOGUED STAR"}[o.status]||"OBJECT";
+  const statusTxt={known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
   const pm=o.motion||{}, arrow = pm.pa_deg!=null && isMoving(o) ? `<span class="arrow" style="transform:rotate(${-pm.pa_deg}deg)">↑</span> ${compass(pm.pa_deg)}` : "—";
   const cat = pm.catalog_arcsec_per_yr ? ` <span style="color:var(--muted-ink)">· catalogue ${pm.catalog_arcsec_per_yr}″/yr</span>` : "";
   const mols=Object.keys(MOLS).map(k=>{ const v=Math.max(0,o.molecules?.[k]||0), sign=v>=SIGN;
@@ -1581,13 +1589,13 @@ function renderFile(o){
   const inL5 = S.ctx==="training" && S.level===5;
   $("file").innerHTML = `
     <span class="label">Who is it?</span>
-    <h3>${esc(o.name||(inL5?"Training candidate":"Unidentified mover"))}</h3>
+    <h3>${esc(objTitle(o, inL5))}</h3>
     <span class="status ${o.status}">${statusTxt}</span>
     <dl class="rows">
-      <div><dt>Motion</dt><dd><b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}</dd></div>
+      <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}`}</dd></div>
       <div><dt>Heading</dt><dd>${arrow}</dd></div>
       <div><dt>Brightness</dt><dd>${(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
-      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>"}</dd></div>
+      <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
     </dl>
     <div class="mols">${mols}</div>
     <div class="verdict"><b>${vt}</b>${vs}</div>
@@ -1649,12 +1657,12 @@ async function openReport(o){
   txt(g,"SPACE ACADEMY",82,170,"600 18px Manrope","rgba(243,238,228,.55)",5);
   const train = S.field?.training;
   txt(g,train?"FIELD REPORT · TRAINING":"FIELD REPORT · NASA SPHEREx DATA",80,300,"600 22px Manrope","#F6B544",6);
-  const title=(o.name||(train?"Training candidate":"Unidentified mover")).toUpperCase(); g.font="200 76px Unbounded";
+  const title=objTitle(o, train).toUpperCase(); g.font="200 76px Unbounded";
   const words=title.split(" "); let line_="", yy=400; for(const w of words){ const tst=line_?line_+" "+w:w; if(g.measureText(tst).width>900 && line_){ txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4"); line_=w; yy+=88; } else line_=tst; } txt(g,line_,80,yy,"200 76px Unbounded","#F3EEE4");
   yy+=80; const [vt]=verdict(o);
   txt(g,vt,80,yy,"600 32px Manrope","#F07A3A");
   const f=S.field; const rows=[["FIELD", train?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
-    ["CHEMISTRY", Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":"Catalogued"]];
+    ["CHEMISTRY", Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
   yy+=70; for(const [k,v] of rows){ txt(g,k,80,yy,"600 18px Manrope","rgba(243,238,228,.5)",5); txt(g,v,330,yy,"400 28px Manrope","#F3EEE4"); yy+=58; }
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;
