@@ -375,6 +375,11 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <div>Enter coordinates, or tap one of the ready-made patches above.</div>
             <button class="btn btn-amber" id="surpriseBig">🎲 Surprise me</button>
           </div>
+          <div class="empty" id="errState" style="display:none">
+            <div class="display">The archive didn't answer.</div>
+            <div id="errText">No frames came back for this patch.</div>
+            <button class="btn btn-amber" id="retryBtn">↻ Try again</button>
+          </div>
           <div class="loading" id="loading">Pulling frames from the archive…</div>
         </div>
 
@@ -811,7 +816,7 @@ function resetViewerState(){
   stop(); S.epoch=0; S.mode="blink"; S.lens="none"; S.zoom=1; S.selected=null; S.ring=null; S.lastObj=null; S.hintQuad=false;
   const seg=(id,attr,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on", b.dataset[attr]===String(val)));
   seg("modeSeg","m","blink"); seg("lensSeg","l","none"); seg("zoomSeg","z","1");
-  S.scanId=(S.scanId||0)+1; S.apiFrames=null; $("loading").classList.remove("on");
+  S.scanId=(S.scanId||0)+1; S.apiFrames=null; $("loading").classList.remove("on"); $("errState").style.display="none";
   say(""); $("taskExtra").innerHTML=""; $("simNote").hidden=true; $("hintRow").hidden=true; $("hintText").textContent="";
   $("hintBtn").textContent="Need a hint?"; $("hintBtn").hidden=false;
   resetFile(); clearSpectrum();
@@ -1185,7 +1190,7 @@ const api = {
     catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
     finally{ if(tm) clearTimeout(tm); }
   },
-  frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence,source:S.survey}); },
+  frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 60000); },   // cold fields take 15–22 s
   object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
@@ -1353,13 +1358,17 @@ function updateHud(){
 async function scan(ra, dec, fov, key){
   stop(); S.selected=null; S.ring=null; S.track=null; S.lensMaps=null; S.lensPending=[]; S.selSky=null; S.trackReq=(S.trackReq||0)+1; S.clickId=(S.clickId||0)+1; resetFile(); clearSpectrum();
   const myScan=S.scanId=(S.scanId||0)+1;
-  $("emptyState").style.display="none"; $("loading").classList.add("on");
-  try{
-    S.field = buildField(ra, dec, fov, key);
-    S.apiFrames=null;
-    if(CONFIG.API_BASE){ await loadApiFrames(); }
-    else { await new Promise(r=>setTimeout(r,350)); computeFrames(); }
-  }catch(err){ toast("Archive unreachable", "Showing the simulated sky instead. ("+err.message+")"); CONFIG.API_BASE=null; $("demoNote").style.display=""; computeFrames(); }
+  const c=checkCoords(ra, dec, fov); if(!c){ $("loading").classList.remove("on"); return; }
+  [ra, dec, fov]=c;
+  $("emptyState").style.display="none"; $("errState").style.display="none"; $("loading").classList.add("on");
+  S.field = buildField(ra, dec, fov, key);
+  S.apiFrames=null;
+  if(CONFIG.API_BASE){   // real data: a failure shows an error with a retry; the API stays on for the next scan
+    S.field.live=true;
+    try{ if(!await loadApiFrames()) return; }   // false: a newer scan or switch owns the viewer
+    catch(err){ if(S.scanId===myScan) scanFailed(err, [ra, dec, fov, key]); return; }
+  }
+  else { await new Promise(r=>setTimeout(r,350)); if(S.scanId!==myScan) return; computeFrames(); }   // ?api=demo only
   if(S.scanId!==myScan) return;
   $("loading").classList.remove("on");
   S.epoch=0; draw(); play();
@@ -1368,18 +1377,57 @@ async function scan(ra, dec, fov, key){
   if(!key && !S.field.target && !S.apiFrames) toast("Quiet patch", "Nothing moving here. Shift the coordinates a little and scan again.");
 }
 function computeFrames(){ S.frames = S.field.epochs.map((_,e)=>renderFrame(S.field, e, S.det)); S.apiFrames=null; }
+// Field of view: the values the #fovIn select offers. RA wraps; Dec outside ±90° or garbage is refused.
+const FOVS=[...document.querySelectorAll("#fovIn option")].map(o=>+o.value), FOV_DEF=0.1;
+function clampFov(v){ v=+v; if(!isFinite(v)||v<=0) return FOV_DEF; v=Math.min(Math.max(v,FOVS[0]),FOVS[FOVS.length-1]); return FOVS.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a); }
+function checkCoords(ra, dec, fov, quiet){
+  ra=+ra; dec=+dec;
+  if(!isFinite(ra)||!isFinite(dec)||dec<-90||dec>90){ if(!quiet) toast("Check the coordinates","RA 0–360° or hh mm ss; Dec −90…+90° or ±dd mm ss."); return null; }
+  const f=clampFov(fov); if(!quiet && f!==+fov) toast("Field of view adjusted", `${fov}° is outside ${FOVS[0]}–${FOVS[FOVS.length-1]}°, using ${f}°.`);
+  return [((ra%360)+360)%360, dec, f];
+}
+function scanFailed(err, args){
+  $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
+  const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
+  $("errText").textContent=`No frames came back (${err.message||"network error"}). The archive can be slow or busy; try again in a moment.`;
+  $("errState").style.display=""; $("retryBtn").onclick=()=>scan(...args);
+  toast("Archive didn't answer", "No frames for this patch. Tap “Try again” or scan another one.");
+}
+// Loads real frames for the current field. Returns false (and changes nothing) if a newer scan or
+// detector/cadence switch started meanwhile; throws only if this request is still the current one.
 async function loadApiFrames(){
-  const f=S.field;
-  const data=await api.frames(f.ra,f.dec,f.fov,S.det,"blink");
-  for(const fr of data.frames) fr.img=await loadImg(fr.png);
-  if(data.diff) for(const fr of data.diff) fr.img=await loadImg(fr.png);
+  const f=S.field, id=S.scanId, req=S.frameReq=(S.frameReq||0)+1;
+  const stale=()=>id!==S.scanId || req!==S.frameReq || f!==S.field;
+  let data;
+  try{
+    for(;;){   // the detector or cadence may change while a scan is loading: ask again with the new one
+      const det=S.det, cad=S.cadence, src=S.survey;
+      data=await api.frames(f.ra,f.dec,f.fov,det,"blink",cad,src);
+      if(stale()) return false;
+      for(const fr of data.frames) fr.img=await loadImg(fr.png);
+      if(data.diff) for(const fr of data.diff) fr.img=await loadImg(fr.png);
+      if(stale()) return false;
+      if(det===S.det && cad===S.cadence && src===S.survey) break;
+    }
+  }catch(e){ if(stale()) return false; throw e; }
   f.N=data.size_px||f.N; S.apiFrames=data;
   S.epoch=Math.min(S.epoch, data.frames.length-1);   // frame count differs per detector and cadence
   f.stars=(data.sources||[]).map(s=>({x:s.x, y:s.y, f:1, det:[1,1,1,1,1,1], id:s.id||"Source"}));
   const key=f.target?.key||null;
   f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}} : null;
   loadMovers();
+  return true;
 }
+// Detector / cadence switch on a real field: reload its frames; on failure keep the old frames and settings.
+async function reloadFrames(undo, after){
+  $("loading").classList.add("on");
+  let ok;
+  try{ ok=await loadApiFrames(); if(ok && S.track) await followTrack(S.track.ra, S.track.dec); }
+  catch(e){ ok=null; undo(); toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
+  if(ok===false) return;   // a newer scan or switch owns the viewer and the spinner
+  $("loading").classList.remove("on"); if(ok && after) after(); draw();
+}
+const segOn=(id,attr,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on", b.dataset[attr]===String(val)));
 
 // Moving candidates (asteroids, comets) on "Every visit" frames: spots that are there now but not on the
 // other frames. Fetched per field + detector; drawn as amber diamonds, solid on the frames they appear in.
@@ -1456,13 +1504,13 @@ async function lensPaint(f, o){
 bindSeg("lensSeg","l", l=>{ S.lens=l; if(l!=="none") ensureLens(); if(S.field) draw(); if(S.lastObj) renderSpectrum(S.lastObj); if(l!=="none") track("lens",{val:l}); if(S.ctx==="training") onTrainingLens(l); });
 $("detSeg").innerHTML = DETECTORS.map(d=>`<button data-d="${d.id}" class="${d.id===S.det?"on":""}">D${d.id}</button>`).join("");
 $("detHint").textContent = DETECTORS[S.det-1].range;
+function setDet(d){ S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range; segOn("detSeg","d",S.det); if(S.lastObj) renderSpectrum(S.lastObj); }   // spectrum: move the highlighted band
 bindSeg("detSeg","d", async d=>{
-  S.det=+d; $("detHint").textContent=DETECTORS[S.det-1].range;
-  if(S.lastObj) renderSpectrum(S.lastObj);   // move the highlighted detector band under the spectrum
+  const prev=S.det; setDet(d);
   track("detector",{val:+d});
   if(!S.field) return;
-  if(S.apiFrames){ $("loading").classList.add("on"); try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); } $("loading").classList.remove("on"); } else computeFrames();
-  draw();
+  if(S.field.live){ if(S.apiFrames) reloadFrames(()=>setDet(prev)); }   // still loading: the pending request picks up the new detector
+  else { computeFrames(); draw(); }
 });
 
 // Ask the server where the clicked object sits on each frame of the current detector.
@@ -1485,21 +1533,17 @@ function applySurveyPlates(){
   $("survHint").textContent = wise ? "WISE W2 4.6 µm · a frame every 6 months since 2010 · via WiseView" : "6 infrared colours and chemistry";
 }
 bindSeg("survSeg","s", async v=>{
-  S.survey=v; track("survey",{val:v});
+  const prev=S.survey; S.survey=v; track("survey",{val:v});
   if(v==="wise" && S.lens!=="none"){ S.lens="none"; [...$("lensSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.l==="none")); if(S.lastObj) renderSpectrum(S.lastObj); }
   applySurveyPlates();
-  if(!S.apiFrames) return;
-  stop(); $("loading").classList.add("on");
-  try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); }
-  $("loading").classList.remove("on"); S.epoch=0; draw(); play();
+  if(!S.field?.live || !S.apiFrames) return;   // still loading: the pending request picks up the new survey
+  stop(); reloadFrames(()=>{ S.survey=prev; segOn("survSeg","s",prev); applySurveyPlates(); play(); }, ()=>{ S.epoch=0; play(); });
 });
+function cadHint(){ $("cadHint").textContent = S.cadence==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass"; }
 bindSeg("cadSeg","c", async c=>{
-  S.cadence=c; track("cadence",{val:c});
-  $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
-  if(!S.apiFrames) return;
-  stop(); $("loading").classList.add("on");
-  try{ await loadApiFrames(); if(S.track) await followTrack(S.track.ra, S.track.dec); }catch(e){ toast("Archive unreachable", e.message); }
-  $("loading").classList.remove("on"); S.epoch=0; draw(); play();
+  const prev=S.cadence; S.cadence=c; track("cadence",{val:c}); cadHint();
+  if(!S.field?.live || !S.apiFrames) return;   // still loading: the pending request picks up the new cadence
+  stop(); reloadFrames(()=>{ S.cadence=prev; segOn("cadSeg","c",prev); cadHint(); play(); }, ()=>{ S.epoch=0; play(); });
 });
 
 /* ---------- selecting objects ---------- */
@@ -1731,8 +1775,8 @@ $("copySite").onclick=async()=>{ try{ await navigator.clipboard.writeText(SITE_U
 /* ---------- wiring & boot ---------- */
 $("searchForm").onsubmit=e=>{
   e.preventDefault();
-  const ra=parseRA($("raIn").value), dec=parseDec($("decIn").value), fov=+$("fovIn").value;
-  if(!isFinite(ra)||!isFinite(dec)||ra<0||ra>=360||dec<-90||dec>90) return toast("Check the coordinates","RA 0–360° or hh mm ss; Dec −90…+90° or ±dd mm ss.");
+  const c=checkCoords(parseRA($("raIn").value), parseDec($("decIn").value), $("fovIn").value); if(!c) return;
+  const [ra, dec, fov]=c;
   const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;
   if(S.ctx==="free") freeTitle();
   scan(ra,dec,fov,key);
@@ -1750,10 +1794,14 @@ window.addEventListener("resize",()=>S.field&&!$("vPlay").hidden&&updateHud());
   if(CONFIG.API_BASE) $("demoNote").style.display="none";
   resetFile(); clearSpectrum(); renderProgress();
   const q=new URLSearchParams(location.search), ra=parseRA(q.get("ra")||""), dec=parseDec(q.get("dec")||"");
-  if(isFinite(ra)&&isFinite(dec)&&q.get("ra")){
-    $("raIn").value=ra; $("decIn").value=dec; if(q.get("fov")) $("fovIn").value=q.get("fov");
-    const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;
-    startFree([ra,dec,+$("fovIn").value,key]);
+  if(q.get("ra")||q.get("dec")){   // shared link: validate before asking the server anything
+    const c=checkCoords(ra, dec, q.get("fov")||FOV_DEF, true);
+    if(!c){ startFree(); toast("This link has bad coordinates", `RA ${esc(q.get("ra")||"?")}, Dec ${esc(q.get("dec")||"?")} is not on the sky (Dec must be −90…+90°). Pick a patch instead.`); return; }
+    const [r, d, fov]=c;
+    if(q.get("fov") && fov!==+q.get("fov")) toast("Field of view adjusted", `${esc(q.get("fov"))}° is outside ${FOVS[0]}–${FOVS[FOVS.length-1]}°, using ${fov}°.`);
+    $("raIn").value=r; $("decIn").value=d; $("fovIn").value=String(fov);
+    const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-r)<.01&&Math.abs(TARGETS[k].dec-d)<.01)||null;
+    startFree([r,d,fov,key]);
   }
 })();
 </script>
