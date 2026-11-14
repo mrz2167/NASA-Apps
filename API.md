@@ -100,6 +100,15 @@ The frontend writes the verdict itself from these numbers (moving + methane → 
 
 ---
 
+## WISE/NEOWISE frames: `source=wise`
+
+`/api/frames?ra&dec&fov&source=wise` returns 20–23 frames of WISE/NEOWISE W2 (4.6 µm), one per six-month
+WISE pass from 2010 to 2024 (unTimely coadds via WiseView; `wise.py`), in the same response shape:
+`pixel_arcsec` = 2.75, `center` = pixel position of (ra, dec) for click→sky conversion, `target.positions`
+= the centre object's path (known targets follow their catalogue motion, refined on the image), `meta.credit`.
+`detector`/`cadence` are ignored; there are no molecule maps. `/api/track?…&source=wise&frame=N` follows a
+clicked spot from frame N forwards and backwards. Cached in `cache/wise/`.
+
 ## 3. `GET /api/lens`
 
 Per-pixel molecule maps for the molecule lenses: where on the picture the light dips in the water, methane,

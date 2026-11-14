@@ -280,8 +280,12 @@ def _track(sky: dict, imgs: list, coord: SkyCoord) -> list[dict]:
 @app.get("/api/frames")
 def frames(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
            detector: int = Query(4, ge=1, le=6), mode: str = "blink",
-           cadence: str = Query("pass", pattern="^(pass|visit)$")):
-    """cadence: "pass" — эпоха раз в полгода; "visit" — каждый проход SPHEREx порезан на сеансы съёмки (дни)."""
+           cadence: str = Query("pass", pattern="^(pass|visit)$"),
+           source: str = Query("spherex", pattern="^(spherex|wise)$")):
+    """cadence: "pass" — эпоха раз в полгода; "visit" — каждый проход SPHEREx порезан на сеансы съёмки (дни).
+    source="wise" — вместо SPHEREx кадры WISE/NEOWISE W2 2010–2024 (detector и cadence не используются)."""
+    if source == "wise":
+        return _wise_frames(ra, dec, fov)
     try:
         sky = _load_sky(ra, dec, fov, cadence, detector)
     except SkyUnavailable as e:
@@ -455,16 +459,107 @@ def movers(ra: float, dec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
     return _clean({"n_frames": len(imgs), "candidates": out})
 
 
+# ---------- WISE/NEOWISE 2010–2024 (wise.py) ----------
+
+def _wise(ra: float, dec: float, fov: float) -> dict:
+    from wise import WiseUnavailable, get_wise
+    try:
+        return get_wise(ra, dec, fov)
+    except WiseUnavailable as e:
+        raise HTTPException(503, str(e))
+
+
+def _wise_px(w: dict, coord: SkyCoord) -> tuple[float, float]:
+    """Небо -> (столбец, строка сверху вниз) кадра WISE. Строки PNG идут сверху вниз, а у WiseView
+    пиксели считаются с нуля: сверено по звёздам Gaia в трёх полях (остаток ≲ 0.5 пикселя)."""
+    x, y = (float(v) for v in w["wcs"].world_to_pixel(coord))
+    return x, w["shape"][0] - 2 - y
+
+
+def _wise_sky(w: dict, col: float, row: float) -> SkyCoord:
+    return w["wcs"].pixel_to_world(col, w["shape"][0] - 2 - row)
+
+
+def _wise_known_path(w: dict, center: SkyCoord) -> list | None:
+    """Если в центре поля тестовый объект (targets.py), его путь по кадрам WISE — по каталожному
+    движению с уточнением по пятну рядом. Центр поля — положение «сейчас», а от последнего кадра WISE
+    (2024) быстрые объекты успевают уйти на несколько пикселей, и ведение от центра срывается."""
+    from targets import TARGETS, coord_at
+    from wise import centroid
+    for name in TARGETS:
+        try:
+            if coord_at(name).separation(center).arcsec > 30:
+                continue
+        except Exception:
+            continue
+        out = []
+        for f in w["frames"]:
+            px, py = _wise_px(w, coord_at(name, f["date"]))
+            out.append(centroid(f["image"], px, py, search=2) or (px, py))
+        return out
+    return None
+
+
+def _wise_frames(ra: float, dec: float, fov: float) -> dict:
+    from wise import track as wtrack
+    w = _wise(ra, dec, fov)
+    imgs = [f["image"] for f in w["frames"]]
+    ny = w["shape"][0]
+    labels = [f"{f['date'][:4]} · {'Spring' if int(f['date'][5:7]) < 7 else 'Autumn'}" for f in w["frames"]]
+    out_frames = [{"label": lab, "date": f["date"], "png": _png_uri(np.flipud(f["image"]))}
+                  for lab, f in zip(labels, w["frames"])]
+    ref = imgs[0].astype(np.float32)
+    diffs = [im.astype(np.float32) - ref for im in imgs]
+    finite = np.concatenate([np.abs(d).ravel() for d in diffs[1:]]) if len(diffs) > 1 else np.array([1.0])
+    lim = float(np.percentile(finite, 99.5)) or 1.0
+    out_diff = [{"label": lab, "png": _png_uri(np.flipud(_diff_rgb(d, lim)))} for lab, d in zip(labels, diffs)]
+    center = SkyCoord(ra, dec, unit="deg")
+    cx, cy = _wise_px(w, center)
+    path = _wise_known_path(w, center)
+    if path is None:                                                  # неизвестный объект: ведём от последнего кадра
+        path = wtrack(w["frames"], cx, cy, start=len(imgs) - 1)
+    from photutils.detection import find_peaks
+    last = imgs[-1].astype(float)
+    med = np.median(last); sig = 1.4826 * np.median(np.abs(last - med)) or 1.0
+    pk = find_peaks(last - med, threshold=6 * sig, box_size=5, npeaks=40, border_width=2)
+    sources = [] if pk is None else [{"x": round(float(r["x_peak"]) + 0.5, 2), "y": round(float(r["y_peak"]) + 0.5, 2),
+                                      "id": f"WISE src {k + 1}"} for k, r in enumerate(pk)]
+    return _clean({
+        "size_px": int(ny), "pixel_arcsec": w["pixel_arcsec"],
+        "center": {"x": round(cx + 0.5, 2), "y": round(cy + 0.5, 2)},
+        "frames": out_frames, "diff": out_diff, "sources": sources,
+        "target": {"positions": [{"x": round(px + 0.5, 2), "y": round(py + 0.5, 2)} for px, py in path],
+                   "molecules": None},
+        "meta": {"source": "wise", "survey": "WISE/NEOWISE W2 4.6 µm", "credit": w["credit"],
+                 "n_images": len(imgs), "cadence": "pass", "warnings": []},
+    })
+
+
+def _wise_track(ra: float, dec: float, fra: float, fdec: float, fov: float, frame: int) -> dict:
+    from wise import track as wtrack
+    w = _wise(fra, fdec, fov)
+    col, row = _wise_px(w, SkyCoord(ra, dec, unit="deg"))
+    start = min(frame, len(w["frames"]) - 1)
+    path = wtrack(w["frames"], col, row, start=start)
+    c = _wise_sky(w, *path[start])
+    return {"ra": round(float(c.ra.deg), 6), "dec": round(float(c.dec.deg), 6),
+            "positions": [{"x": round(px + 0.5, 2), "y": round(py + 0.5, 2)} for px, py in path]}
+
+
 @app.get("/api/track")
 def track(ra: float, dec: float, fra: float, fdec: float, fov: float = Query(0.1, gt=0.01, le=0.5),
           detector: int = Query(4, ge=1, le=6), cadence: str = Query("pass", pattern="^(pass|visit)$"),
+          source: str = Query("spherex", pattern="^(spherex|wise)$"), frame: int = Query(0, ge=0),
           snap: bool = True):
     """Путь выбранного объекта по кадрам поля (fra, fdec, fov, detector) — для «Trail» и линз.
+    source="wise": путь по кадрам WISE; frame — на каком кадре кликнули (оттуда ведём пятно).
 
     ra, dec — положение выбранного объекта (сайт шлёт центр точки, а не место клика);
     snap=1 — притянуть к центру ближайшего источника, snap=0 — взять как есть (движущиеся кандидаты).
     positions идут в том же порядке, что frames в /api/frames с теми же параметрами.
     """
+    if source == "wise":
+        return _wise_track(ra, dec, fra, fdec, fov, frame)
     try:
         sky = _load_sky(fra, fdec, fov, cadence, detector)
     except SkyUnavailable as e:

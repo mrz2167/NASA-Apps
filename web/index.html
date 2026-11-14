@@ -392,7 +392,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <span class="label ctl-label">Epoch</span><input type="range" id="epochIn" min="0" max="3" step="1" value="0" aria-label="Epoch">
             <span class="label ctl-label">Speed</span><input type="range" id="speedIn" min="200" max="1400" step="100" value="700" style="width:90px" aria-label="Speed">
           </div>
-          <div class="plate" data-tool="lens"><span class="new">NEW</span>
+          <div class="plate" data-tool="lens" id="lensPlate"><span class="new">NEW</span>
             <span class="label ctl-label">Lens</span>
             <div class="seg lens" id="lensSeg"><button data-l="none" class="on">Normal</button><button data-l="water">Water</button><button data-l="methane">Methane</button><button data-l="co2">CO₂</button><button data-l="co">CO</button></div>
           </div>
@@ -400,12 +400,17 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
             <span class="label ctl-label">Zoom</span>
             <div class="seg" id="zoomSeg"><button data-z="1" class="on">1×</button><button data-z="2">2×</button><button data-z="4">4×</button></div>
           </div>
+          <div class="plate" data-tool="det" id="survPlate">
+            <span class="label ctl-label">Survey</span>
+            <div class="seg" id="survSeg"><button data-s="spherex" class="on">SPHEREx 2025–26</button><button data-s="wise">WISE 2010–24</button></div>
+            <span class="det-hint" id="survHint">6 infrared colours and chemistry</span>
+          </div>
           <div class="plate" data-tool="det" id="cadPlate">
             <span class="label ctl-label">Frames</span>
             <div class="seg" id="cadSeg"><button data-c="pass" class="on">Every 6 months</button><button data-c="visit">Every visit</button></div>
             <span class="det-hint" id="cadHint">one frame per sky pass</span>
           </div>
-          <div class="plate" data-tool="det">
+          <div class="plate" data-tool="det" id="detPlate">
             <span class="label ctl-label">Detector</span>
             <div class="seg" id="detSeg"></div>
             <span class="det-hint" id="detHint"></span>
@@ -435,7 +440,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
 
   <footer>
     <span>LUMEN Space Academy · Tashkent · Ad Lumen — toward the light</span>
-    <span>Data: NASA SPHEREx via NASA/IPAC Infrared Science Archive (IRSA). Not an official NASA product.</span>
+    <span>Data: NASA SPHEREx via NASA/IPAC Infrared Science Archive (IRSA); WISE/NEOWISE unTimely coadds (Meisner, Caselden &amp; Schlafly 2023) via WiseView, Backyard Worlds. Not an official NASA product.</span>
   </footer>
 </div>
 
@@ -695,7 +700,7 @@ const store = {
 const P = Object.assign({done:{}, steps:{}, tips:{}, name:"", epochSteps:0}, store.get()||{});
 const save = () => store.set(P);
 
-const S = { ctx:null, level:null, caseId:null, field:null, epoch:0, det:4, cadence:"pass", mode:"blink", lens:"none", zoom:1, playing:false, timer:null, speed:700,
+const S = { ctx:null, level:null, caseId:null, field:null, epoch:0, det:4, cadence:"pass", survey:"spherex", mode:"blink", lens:"none", zoom:1, playing:false, timer:null, speed:700,
             selected:null, ring:null, frames:null, apiFrames:null, lastObj:null, tr:{} };
 
 /* ---------- helpers ---------- */
@@ -795,7 +800,8 @@ function leavePlay(){ stop(); clearTimeout(S.tr.hintTimer); S.ctx=null; S.caseId
 
 function setTools(list, fresh=null){
   document.querySelectorAll(".plate[data-tool]").forEach(p=>{ p.hidden=!list.includes(p.dataset.tool); p.classList.toggle("is-new", p.dataset.tool===fresh); });
-  if(!CONFIG.API_BASE) $("cadPlate").hidden=true;   // visits exist only in real SPHEREx data
+  if(!CONFIG.API_BASE){ $("cadPlate").hidden=true; $("survPlate").hidden=true; }   // real data only
+  applySurveyPlates();
   $("file").hidden = !list.includes("who");
   $("specPanel").hidden = !list.includes("lens");
   const sideOn = list.includes("who") || list.includes("lens");
@@ -1179,11 +1185,11 @@ const api = {
     catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
     finally{ if(tm) clearTimeout(tm); }
   },
-  frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence}); },
+  frames(ra,dec,fov,det,mode){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:S.cadence,source:S.survey}); },
   object(ra,dec,snap=true){ return this.get("/api/object", snap?{ra,dec}:{ra,dec,snap:0}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
-  track(ra,dec,f,det,snap=true){ return this.get("/api/track",Object.assign({ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence}, snap?{}:{snap:0})); }
+  track(ra,dec,f,det,snap=true){ return this.get("/api/track",Object.assign({ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence,source:S.survey,frame:S.epoch}, snap?{}:{snap:0})); }
 };
 $("surpriseBig").onclick=()=>surprise();
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
@@ -1192,6 +1198,9 @@ function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.on
 const canvas=$("sky"), ctx=canvas.getContext("2d");
 const off=document.createElement("canvas"), octx=off.getContext("2d");
 function stretch(v){ const a=.12; v-=0.035; return Math.max(0,Math.min(1, Math.asinh(Math.max(0,v)/a)/Math.asinh(2.6/a))); }
+// Pixel scale and field centre of the frames on screen: SPHEREx 6.15″, WISE 2.75″ (centre from the server).
+const pixArc = () => S.apiFrames?.pixel_arcsec || CONFIG.PIX_ARCSEC;
+const fieldCentre = () => S.apiFrames?.center || {x:S.field.N/2, y:S.field.N/2};
 function view(){ const N=S.field.N, sw=N/S.zoom; return {sx:(N-sw)/2, sy:(N-sw)/2, sw}; }
 function toCanvas(x,y){ const v=view(), k=canvas.width/v.sw; return {x:(x-v.sx)*k, y:(y-v.sy)*k}; }
 
@@ -1204,7 +1213,7 @@ function draw(){
     if(fr && fr.img) ctx.drawImage(fr.img, v.sx*fr.img.width/N, v.sy*fr.img.height/N, v.sw*fr.img.width/N, v.sw*fr.img.height/N, 0,0,W,W);
     // molecule lens: dim the sky a little and paint where the light dips in that molecule's band.
     // In "What changed" the diff colours carry the story, so the map goes on as an outline + light tint.
-    const lm = S.lens!=="none" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
+    const lm = S.lens!=="none" && S.survey==="spherex" && S.lensMaps?.field===S.field ? S.lensMaps.imgs[S.lens] : null;
     if(lm && S.mode!=="diff"){
       ctx.fillStyle="rgba(7,10,32,.45)"; ctx.fillRect(0,0,W,W);
       ctx.drawImage(lm, v.sx*lm.width/N, v.sy*lm.height/N, v.sw*lm.width/N, v.sw*lm.height/N, 0,0,W,W);
@@ -1332,10 +1341,11 @@ function updateHud(){
   const meta=S.apiFrames?.meta||{}, wl=meta.wavelength_um?.[S.epoch], nx=meta.n_exposures?.[S.epoch];
   const narrow=canvas.getBoundingClientRect().width<460, lam=Number.isFinite(wl)?` · <span style="text-transform:none">λ ${wl.toFixed(2)} µm</span>`:"";
   $("hudDet").innerHTML = S.ctx==="training" ? (S.field.sim||"") .split(" · ")[0]
+    : S.survey==="wise" && S.apiFrames ? `WISE W2 · <span style="text-transform:none">4.6 µm</span>`
     : (narrow && lam ? `D${S.det}` : `Detector ${S.det} · <span style="text-transform:none">${DETECTORS[S.det-1].range}</span>`) + lam;
   $("frameCap").title = S.ctx!=="training" && (lam || nx) ? [Number.isFinite(wl)?`seen at ${wl.toFixed(2)} µm`:"", nx?`${nx} exposures stacked`:""].filter(Boolean).join(" · ") : "";
   const pxCanvas = canvas.getBoundingClientRect().width / view().sw; const arcsec=30;
-  $("scaleI").style.width = Math.max(8, pxCanvas*arcsec/CONFIG.PIX_ARCSEC)+"px"; $("scaleT").textContent=arcsec+"″";
+  $("scaleI").style.width = Math.max(8, pxCanvas*arcsec/pixArc())+"px"; $("scaleT").textContent=arcsec+"″";
   $("epochIn").value=S.epoch;
 }
 
@@ -1360,14 +1370,16 @@ async function scan(ra, dec, fov, key){
 function computeFrames(){ S.frames = S.field.epochs.map((_,e)=>renderFrame(S.field, e, S.det)); S.apiFrames=null; }
 // Before the frames change (detector, cadence): the star list is rebuilt for the new frames, so keep the
 // selection as a grid position, drop the old path and ignore any path request still on its way.
+// The selection is kept in sky coordinates (S.selSky): the new frames may even be another grid (WISE).
 function freezeSelection(){
-  if(typeof S.selected==="number"){ const p=S.field?.stars[S.selected]; S.selected = p ? {x:p.x, y:p.y} : null; }
-  else if(S.selected && typeof S.selected==="object" && S.selected.mover!=null) S.selected={x:S.selected.x, y:S.selected.y};
+  if(S.selected!=null && S.selected!=="target" && !S.selSky) S.selected=null;   // nothing to carry over
   S.track=null; S.trackReq=(S.trackReq||0)+1;
 }
-// After the switch: follow the same object again on the new frames.
+// After the switch: put the selection on the new grid and follow the same object on the new frames.
 async function refollow(){
-  if(S.selSky && S.selected!=null && S.selected!=="target") await followTrack(S.selSky.ra, S.selSky.dec);
+  if(!S.selSky || S.selected==null || S.selected==="target") return;
+  const g=skyToGrid(S.selSky.ra, S.selSky.dec); S.selected={x:g.x, y:g.y};
+  await followTrack(S.selSky.ra, S.selSky.dec);
 }
 async function loadApiFrames(){
   const f=S.field;
@@ -1385,7 +1397,7 @@ async function loadApiFrames(){
 // Moving candidates (asteroids, comets) on "Every visit" frames: spots that are there now but not on the
 // other frames. Fetched per field + detector; drawn as amber diamonds, solid on the frames they appear in.
 async function loadMovers(){
-  const f=S.field, key=f && S.apiFrames && S.cadence==="visit" ? `${f.ra},${f.dec},${f.fov},${S.det}` : null;
+  const f=S.field, key=f && S.apiFrames && S.cadence==="visit" && S.survey==="spherex" ? `${f.ra},${f.dec},${f.fov},${S.det}` : null;
   if(!key){ S.movers=null; moverNote(); return; }
   if(S.movers?.key===key) return;
   S.movers={key, field:f, list:null};
@@ -1468,9 +1480,16 @@ bindSeg("detSeg","d", async d=>{
 
 // Ask the server where the clicked object sits on each frame of the current detector.
 // Grid pixel (x right, y down, centre N/2) -> sky, same tangent-plane approximation the server's grid uses.
+// Uses the frames' own pixel scale and centre (WISE frames: 2.75″ pixels, SPHEREx: 6.15″).
 function gridToSky(x, y){
-  const f=S.field, N=f.N, ddec=(N/2-y)*CONFIG.PIX_ARCSEC/3600, dra=-(x-N/2)*CONFIG.PIX_ARCSEC/3600/Math.cos(f.dec*Math.PI/180);
+  const f=S.field, c0=fieldCentre(), pa=pixArc(), ddec=(c0.y-y)*pa/3600, dra=-(x-c0.x)*pa/3600/Math.cos(f.dec*Math.PI/180);
   return {ra:((f.ra+dra)%360+360)%360, dec:f.dec+ddec};
+}
+// Sky -> grid pixel of the frames now loaded (inverse of gridToSky).
+function skyToGrid(ra, dec){
+  const f=S.field, c0=fieldCentre(), pa=pixArc();
+  let dra=ra-f.ra; if(dra>180) dra-=360; if(dra<-180) dra+=360;
+  return {x:c0.x - dra*Math.cos(f.dec*Math.PI/180)*3600/pa, y:c0.y - (dec-f.dec)*3600/pa};
 }
 // A mover's path on every frame: its own positions where it was seen, the nearest sighting elsewhere.
 function moverPath(c){
@@ -1488,6 +1507,23 @@ async function followTrack(ra, dec){
 }
 
 // Frames: one per six-month sky pass, or one per observing visit (SPHEREx sees a spot in bursts a few days apart).
+// Survey: SPHEREx (2025–26, six colours, chemistry) or WISE/NEOWISE W2 (2010–24, fourteen years of motion).
+function applySurveyPlates(){
+  if(!CONFIG.API_BASE || S.ctx==="training") return;
+  const wise=S.survey==="wise";
+  for(const id of ["cadPlate","detPlate","lensPlate"]) $(id).hidden = wise || $("survPlate").hidden;
+  $("survHint").textContent = wise ? "WISE W2 4.6 µm · a frame every 6 months since 2010 · via WiseView" : "6 infrared colours and chemistry";
+}
+bindSeg("survSeg","s", async v=>{
+  S.survey=v; track("survey",{val:v});
+  if(v==="wise" && S.lens!=="none"){ S.lens="none"; [...$("lensSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.l==="none")); if(S.lastObj) renderSpectrum(S.lastObj); }
+  applySurveyPlates();
+  if(!S.apiFrames) return;
+  stop(); $("loading").classList.add("on");
+  freezeSelection();
+  try{ await loadApiFrames(); await refollow(); }catch(e){ toast("Archive unreachable", e.message); }
+  $("loading").classList.remove("on"); S.epoch=0; draw(); play();
+});
 bindSeg("cadSeg","c", async c=>{
   S.cadence=c; track("cadence",{val:c});
   $("cadHint").textContent = c==="visit" ? "a frame every few days: noisier, and each visit sees a slightly different wavelength (λ on the frame), so stars flicker a little" : "one frame per sky pass";
