@@ -1203,7 +1203,9 @@ const api = {
     const u=new URL(CONFIG.API_BASE+path); for(const k in params) u.searchParams.set(k, params[k]);
     const ac = timeoutMs && typeof AbortController!=="undefined" ? new AbortController() : null;
     const tm = ac ? setTimeout(()=>ac.abort(), timeoutMs) : null;
-    try{ const r=await fetch(u, ac?{signal:ac.signal}:{}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+    try{ const r=await fetch(u, ac?{signal:ac.signal}:{});
+      if(!r.ok){ let d=""; try{ d=(await r.json()).detail||""; }catch(_){} throw new Error(d ? String(d).slice(0,160) : r.status); }   // the server explains, e.g. "IRSA is not responding"
+      return await r.json(); }
     catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
     finally{ if(tm) clearTimeout(tm); }
   },

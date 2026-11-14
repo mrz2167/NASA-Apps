@@ -51,15 +51,30 @@ def _key(*parts) -> str:
     return hashlib.md5("|".join(map(str, parts)).encode()).hexdigest()[:12]
 
 
-def _tap(query: str, retries: int = 3) -> Table:
+TAP_TIMEOUT_S = float(os.environ.get("SKYWATCH_TAP_TIMEOUT", "40"))
+_TAP_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="tap")   # timed-out calls keep a thread ~2 min
+
+
+def _tap(query: str, retries: int = 2) -> Table:
+    """IRSA TAP query with a hard deadline per attempt.
+
+    pyvo sets no connect timeout, so an unreachable IRSA hangs ~2 min per attempt on Linux; with the old
+    3 attempts the request outlived Railway's 5-minute proxy limit and the site got a bare 502. Now the
+    whole search gives up after ~85 s and the site can say so (the stuck thread finishes on its own).
+    """
+    from concurrent.futures import TimeoutError as FutureTimeout
     from astroquery.ipac.irsa import Irsa
     for attempt in range(retries):
+        fut = _TAP_POOL.submit(lambda: Irsa.query_tap(query).to_table())
         try:
-            return Irsa.query_tap(query).to_table()
-        except Exception:
-            if attempt == retries - 1:
-                raise
-            _time.sleep(10 * (attempt + 1))
+            return fut.result(timeout=TAP_TIMEOUT_S)
+        except FutureTimeout:
+            err = TimeoutError(f"IRSA did not answer within {TAP_TIMEOUT_S:.0f} s")
+        except Exception as e:
+            err = e
+        if attempt == retries - 1:
+            raise err
+        _time.sleep(5)
 
 
 NEAR_ARCSEC = 3.0  # запрос в пределах 3″ от закэшированного центра берётся из кэша

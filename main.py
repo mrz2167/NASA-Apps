@@ -31,6 +31,7 @@ from sky import SkyUnavailable, analyze, get_sky
 from render import fill_saturated, stretch_limits, to_uint8
 from identify import _centroid, _check_catalogs, gaia_cone, match_gaia, who_is_it
 from data import CACHE
+import skycache
 from astropy.table import Table
 
 warnings.filterwarnings("ignore")
@@ -129,11 +130,15 @@ def level_file(name: str):
 
 _SKIES: "OrderedDict[tuple, dict]" = OrderedDict()
 _LOCK = threading.Lock()
-_MAX_SKIES = 12
+_MAX_SKIES = 32          # ~6–30 MB per field; the demo fields, visits and WISE all fit
 
 
-def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int | None = None) -> dict:
+def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int | None = None,
+              remember: bool = True) -> dict:
     """Кадры для места: сначала полный набор из кэша на диске, иначе быстрый режим.
+
+    remember=False — собрать и сохранить на диск, но не класть в память (прогрев полей «Surprise me»
+    не должен вытеснять из памяти демо-поля).
 
     cadence="visit" — проходы порезаны на сеансы съёмки (epochs.split_cadence); такие кадры собираются
     только для детектора det: сеансы у каждого детектора свои, и пересобирать все шесть незачем.
@@ -153,6 +158,13 @@ def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int
             return _crop_sky(big, fov)
         except SkyUnavailable:
             pass
+    sky = skycache.get(key)                   # built before (survives restarts on the volume): no FITS reading
+    if sky is not None:
+        if remember:
+            _remember(key, sky)
+        _start_gaia(sky)
+        return sky
+    degraded = False
     try:
         full = get_sky(ra, dec, fov, quick=False, offline=True, detectors=dets, cadence=cadence)
         if full["n_loaded"] >= 0.8 * full["n_wanted"]:
@@ -163,14 +175,26 @@ def _load_sky(ra: float, dec: float, fov: float, cadence: str = "pass", det: int
         kw = dict(quick=True, detectors=dets, cadence=cadence)
         try:
             sky = get_sky(ra, dec, fov, **kw)
-        except SkyUnavailable:
-            sky = get_sky(ra, dec, fov, offline=True, **kw)  # архив лёг — что есть в кэше
-    with _LOCK:
-        _SKIES[key] = sky
-        while len(_SKIES) > _MAX_SKIES:
-            _SKIES.popitem(last=False)
+        except SkyUnavailable as net_err:
+            try:
+                sky = get_sky(ra, dec, fov, offline=True, **kw)  # архив лёг — что есть в кэше
+            except SkyUnavailable:
+                raise net_err from None       # say "the archive isn't answering", not "offline mode"
+            degraded = True
+    if not degraded:                          # a stop-gap set from a dead archive isn't worth keeping for a week
+        sky = skycache.put(key, sky)          # to disk for the next restart; keep the slim copy in memory
+    if remember:
+        _remember(key, sky)
     _start_gaia(sky)
     return sky
+
+
+def _remember(key: tuple, sky: dict) -> None:
+    with _LOCK:
+        _SKIES[key] = sky
+        _SKIES.move_to_end(key)
+        while len(_SKIES) > _MAX_SKIES:
+            _SKIES.popitem(last=False)
 
 
 _GAIA: dict = {}          # ключ поля -> Table | None
@@ -331,8 +355,19 @@ def _clean(o):
 
 @app.get("/api/health")
 def health():
-    """Liveness check: `ok` and how many fields are held in the in-memory cache."""
-    return {"ok": True, "cached_fields": len(_SKIES)}
+    """Liveness check: `ok`, how many fields are held in memory, and the warm-up after a restart.
+
+    `warm.state`: `running` while the demo fields are being loaded, `demo_ready` once every case and
+    "Try" field is in memory (the demo is fast from here), `done` when the "Surprise me" fields are
+    also saved to disk.
+    """
+    import shutil
+    try:
+        du = shutil.disk_usage(CACHE)
+        disk = {"free_gb": round(du.free / 1e9, 1), "used_gb": round(du.used / 1e9, 1)}
+    except OSError:
+        disk = None
+    return {"ok": True, "cached_fields": len(_SKIES), "warm": dict(_WARM), "disk": disk}
 
 
 def _det_items(sky: dict, detector: int) -> list:
@@ -791,9 +826,10 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked 
 
 
 # ---------- прогрев после запуска ----------
-# Демо-объекты сайта (TARGETS и PATCHES в web/index.html): поле 0.1°, детектор 4, кадры раз в полгода —
-# ровно то, что запрашивает сайт. Без прогрева первое открытие объекта после деплоя ждёт 10–17 с
-# (кадры из кэша на диске, анализ, Gaia, карты молекул). SKYWATCH_WARM=0 — не прогревать.
+# Демо-объекты сайта (кейсы и кнопки «Try»): поле 0.1°, детектор 4, кадры раз в проход — ровно то, что
+# запрашивает сайт. Они грузятся в память первыми; собранные поля лежат на томе (skycache), так что после
+# деплоя это секунды, а не минуты. Потом в фоне на диск сохраняются поля «Surprise me» (без памяти).
+# SKYWATCH_WARM=0 — не прогревать.
 WARM_FIELDS = [
     ("Barnard's Star", 269.4463, 4.76783),
     ("WISE 0855-0714", 133.75977, -7.24218),
@@ -801,13 +837,31 @@ WARM_FIELDS = [
     ("RW Aurigae", 76.95609, 30.40113),
     ("R Draconis", 248.16723, 66.75502),
     ("Near Luhman 16", 162.328, -53.319),
+    ("CRBR 2422.8-3423", 246.8525, -24.6842),
 ]
+_WARM: dict = {"state": "idle"}
+
+
+def _surprise_fields() -> list[tuple[str, float, float]]:
+    """Поля «Surprise me» прямо из web/index.html (один список на сайт и сервер)."""
+    import re
+    try:
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        block = html[html.index("const SURPRISES"):]
+        block = block[:block.index("];")]
+    except (OSError, ValueError):
+        return []
+    out = []
+    for m in re.finditer(r'name:"([^"]+)"[^}]*?ra:(-?[\d.]+), dec:(-?[\d.]+)', block):
+        out.append((m.group(1), float(m.group(2)), float(m.group(3))))
+    return out
 
 
 def _warm() -> None:
     import time
     t_all = time.time()
-    print(f"[warm] preloading {len(WARM_FIELDS)} demo fields in the background", flush=True)
+    _WARM.update(state="running", demo_total=len(WARM_FIELDS), demo_done=0, started=round(t_all))
+    print(f"[warm] preloading {len(WARM_FIELDS)} demo fields", flush=True)
     for name, ra, dec in WARM_FIELDS:
         t = time.time()
         try:
@@ -817,6 +871,23 @@ def _warm() -> None:
             print(f"[warm] {name}: {time.time() - t:.1f} s", flush=True)
         except Exception as e:                              # нет кэша и архив недоступен — не страшно
             print(f"[warm] {name}: skipped ({e})", flush=True)
+        _WARM["demo_done"] += 1
+    _WARM.update(state="demo_ready", demo_seconds=round(time.time() - t_all))
+    print(f"[warm] demo fields ready in {time.time() - t_all:.0f} s", flush=True)
+
+    extra = [f for f in _surprise_fields()
+             if all(abs(f[1] - w[1]) > 1e-3 or abs(f[2] - w[2]) > 1e-3 for w in WARM_FIELDS)]
+    _WARM.update(surprise_total=len(extra), surprise_done=0, surprise_failed=0)
+    for name, ra, dec in extra:
+        t = time.time()
+        try:
+            sky = _load_sky(ra, dec, 0.1, remember=False)    # на диск (и Gaia), память не трогаем
+            print(f"[warm] surprise {name}: {time.time() - t:.1f} s ({sky['n_loaded']} images)", flush=True)
+        except Exception as e:
+            _WARM["surprise_failed"] += 1
+            print(f"[warm] surprise {name}: skipped ({e})", flush=True)
+        _WARM["surprise_done"] += 1
+    _WARM.update(state="done", total_seconds=round(time.time() - t_all))
     print(f"[warm] done in {time.time() - t_all:.0f} s", flush=True)
 
 
