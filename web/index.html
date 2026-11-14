@@ -686,17 +686,31 @@ const SURPRISE_TIP = {
 };
 // Shuffle bag: every field once before any repeats.
 // The server says which fields it has built (/api/surprises); the case targets (with a key) are always ready.
-// Until it answers, or without a server, every field is allowed.
-function refreshSurprises(){ if(!CONFIG.API_BASE) return; api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); }).catch(()=>{}); }
-function surprise(){
+// The list grows while the server builds fields in the background, so it is refreshed every few minutes.
+// Without a server (?api=demo) every field is allowed; if the server doesn't answer, only the case targets.
+function refreshSurprises(){
+  if(!CONFIG.API_BASE) return Promise.resolve();
+  S.surpriseAsked=Date.now();
+  return api.get("/api/surprises",{},8000).then(d=>{ S.surpriseReady=new Set(d.ready||[]); })
+    .catch(()=>{ if(!S.surpriseReady) S.surpriseReady=new Set(); });
+}
+function shuffled(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+async function surprise(hops){
+  hops = typeof hops==="number" ? hops : 0;          // onclick passes an event
   if(S.ctx!=="free") startFree();
-  if(!S.surpriseBag || !S.surpriseBag.length){
-    const ok = o => o.key || !S.surpriseReady || S.surpriseReady.has(o.name);
-    S.surpriseBag = SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0).sort(()=>Math.random()-.5);
-    refreshSurprises();
+  if(CONFIG.API_BASE && (!S.surpriseReady || Date.now()-(S.surpriseAsked||0) > 3*60e3)){
+    const wait=refreshSurprises(); if(!S.surpriseReady) await wait;   // first click: wait for the list once
+  }
+  const bad=S.surpriseBad||new Set();
+  const ok = o => !bad.has(o.name) && (o.key || !CONFIG.API_BASE || S.surpriseReady?.has(o.name));
+  S.surpriseBag=(S.surpriseBag||[]).filter(i=>ok(SURPRISES[i]));   // drop fields that stopped being ready
+  if(!S.surpriseBag.length){
+    S.surpriseBag = shuffled(SURPRISES.map((o,i)=>ok(o)?i:-1).filter(i=>i>=0));
     if(S.surpriseBag[0]===S.surpriseLast && S.surpriseBag.length>1) S.surpriseBag.push(S.surpriseBag.shift());
   }
+  if(!S.surpriseBag.length) return toast("No surprises right now", "The archive is busy. Try one of the ready-made patches above.");
   const i=S.surpriseBag.shift(), o=SURPRISES[i]; S.surpriseLast=i;
+  S.surpriseScan={name:o.name, ra:o.ra, dec:o.dec, hops};
   const kind={bd:"Brown dwarf",fast:"Fast-moving star",var:"Variable star"}[o.kind];
   $("raIn").value=o.ra; $("decIn").value=o.dec;
   $("taskT").textContent="Surprise: "+o.name;
@@ -1224,10 +1238,10 @@ const api = {
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 180000); },   // cold fields take 15–90 s (right after a deploy the cache is empty)
-  object(ra,dec){ return this.get("/api/object",{ra,dec}, 60000); },
+  object(ra,dec,snap=true){ return this.get("/api/object", snap?{ra,dec}:{ra,dec,snap:0}, 60000); },
   movers(f,det){ return this.get("/api/movers",{ra:f.ra,dec:f.dec,fov:f.fov,detector:det}); },
   lens(f, o){ return this.get("/api/lens", Object.assign({ra:f.ra,dec:f.dec,fov:f.fov}, o?{ora:o.ra,odec:o.dec}:{})); },
-  track(ra,dec,f,det){ return this.get("/api/track",{ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence,source:S.survey,frame:S.epoch}); }
+  track(ra,dec,f,det,snap=true){ return this.get("/api/track",Object.assign({ra,dec,fra:f.ra,fdec:f.dec,fov:f.fov,detector:det,cadence:S.cadence,source:S.survey,frame:S.epoch}, snap?{}:{snap:0})); }
 };
 $("surpriseBig").onclick=()=>surprise();
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
@@ -1420,6 +1434,11 @@ function checkCoords(ra, dec, fov, quiet){
   return [((ra%360)+360)%360, dec, f];
 }
 function scanFailed(err, args){
+  const sp=S.surpriseScan;
+  if(sp && Math.abs(args[0]-sp.ra)<1e-6 && Math.abs(args[1]-sp.dec)<1e-6){
+    S.surpriseScan=null; (S.surpriseBad=S.surpriseBad||new Set()).add(sp.name);
+    if(sp.hops<2){ toast("That field isn't ready", "The archive is slow right now. Picking another surprise…"); surprise(sp.hops+1); return; }
+  }
   $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
   const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
   const alt=$("errAlt"), down = S.ctx==="free" && S.survey==="spherex" && (err.code==="archive_down" || err.code==="timeout");
@@ -1452,6 +1471,18 @@ function archiveDown(args){
 }
 // Loads real frames for the current field. Returns false (and changes nothing) if a newer scan or
 // detector/cadence switch started meanwhile; throws only if this request is still the current one.
+// Before the frames change (detector, cadence, survey) the star list is rebuilt, maybe on another grid (WISE):
+// the selection lives on in sky coordinates (S.selSky); drop the old path and ignore path requests in flight.
+function freezeSelection(){
+  if(S.selected!=null && S.selected!=="target" && !S.selSky) S.selected=null;   // nothing to carry over
+  S.track=null; S.trackReq=(S.trackReq||0)+1;
+}
+// After the switch: put the selection on the new grid and follow the same object on the new frames.
+async function refollow(){
+  if(!S.selSky || S.selected==null || S.selected==="target") return;
+  const g=skyToGrid(S.selSky.ra, S.selSky.dec); S.selected={x:g.x, y:g.y};
+  await followTrack(S.selSky.ra, S.selSky.dec);
+}
 async function loadApiFrames(){
   const f=S.field, id=S.scanId, req=S.frameReq=(S.frameReq||0)+1;
   const stale=()=>id!==S.scanId || req!==S.frameReq || f!==S.field;
@@ -1479,8 +1510,11 @@ async function loadApiFrames(){
 async function reloadFrames(undo, after){
   $("loading").classList.add("on");
   let ok;
-  try{ ok=await loadApiFrames(); if(ok && S.track) await followTrack(S.track.ra, S.track.dec); }
-  catch(e){ ok=null; undo(); toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
+  freezeSelection();
+  try{ ok=await loadApiFrames(); if(ok) await refollow(); }
+  catch(e){ ok=null; undo(); refollow();
+    if(/WiseView|WISE frames/.test(e.message||"")) toast("WISE is unavailable right now", "WiseView, the service that serves the 2010–2024 WISE frames, isn't answering. You're still on SPHEREx; try WISE again in a few minutes.");
+    else toast("Archive didn't answer", `Kept the previous frames (${e.message||"network error"}). Try the switch again.`); }
   if(ok===false) return;   // a newer scan or switch owns the viewer and the spinner
   $("loading").classList.remove("on"); if(ok && after) after(); draw();
 }
@@ -1571,11 +1605,28 @@ bindSeg("detSeg","d", async d=>{
 });
 
 // Ask the server where the clicked object sits on each frame of the current detector.
+// Grid pixel (x right, y down, centre N/2) -> sky, same tangent-plane approximation the server's grid uses.
+// Uses the frames' own pixel scale and centre (WISE frames: 2.75″ pixels, SPHEREx: 6.15″).
+function gridToSky(x, y){
+  const f=S.field, c0=fieldCentre(), pa=pixArc(), ddec=(c0.y-y)*pa/3600, dra=-(x-c0.x)*pa/3600/Math.cos(f.dec*Math.PI/180);
+  return {ra:((f.ra+dra)%360+360)%360, dec:f.dec+ddec};
+}
+// Sky -> grid pixel of the frames now loaded (inverse of gridToSky).
+function skyToGrid(ra, dec){
+  const f=S.field, c0=fieldCentre(), pa=pixArc();
+  let dra=ra-f.ra; if(dra>180) dra-=360; if(dra<-180) dra+=360;
+  return {x:c0.x - dra*Math.cos(f.dec*Math.PI/180)*3600/pa, y:c0.y - (dec-f.dec)*3600/pa};
+}
+// A mover's path on every frame: its own positions where it was seen, the nearest sighting elsewhere.
+function moverPath(c){
+  return Array.from({length:nE()},(_,e)=>{ let best=0, bd=1e9; c.frames.forEach((fr,k)=>{ const d=Math.abs(fr-e); if(d<bd){ bd=d; best=k; } }); return c.positions[best]; });
+}
 async function followTrack(ra, dec){
   const req = S.trackReq = (S.trackReq||0)+1;
   try{
     const t = await api.track(ra, dec, S.field, S.det);
-    if(req!==S.trackReq) return;              // a newer click or scan won
+    if(req!==S.trackReq) return;              // a newer click, scan or frame switch won
+    if((t.positions||[]).length!==nE()){ S.track=null; draw(); return; }   // answer for other frames
     S.track = {positions:t.positions, ra:t.ra, dec:t.dec};
     draw();
   }catch(e){ if(req===S.trackReq){ S.track=null; draw(); } }
@@ -1605,11 +1656,16 @@ bindSeg("cadSeg","c", async c=>{
 
 /* ---------- selecting objects ---------- */
 function hitTest(gx, gy, rect){
-  const f=S.field, v=view(), tol=Math.max(1.6, 25*v.sw/rect.width);   // ~25 screen px
+  // ~25 screen px at any zoom (never less than ~1 grid px, about the size of a star)
+  const f=S.field, v=view(), tol=Math.max(0.9, 25*v.sw/rect.width);
   const nearest = o => Math.min(...Array.from({length:nE()},(_,e)=>{ const p=objPos(f,o,e); return Math.hypot(p.x-gx,p.y-gy); }));
   const cand=[];
   if(f.target) cand.push({kind:"target", d:nearest(f.target)});
   (f.extras||[]).forEach((o,i)=>cand.push({kind:o.kind, i, d:nearest(o)}));
+  // moving candidates (amber diamonds, "Every visit" frames): hit where they are drawn
+  const ml=S.movers?.field===f && S.cadence==="visit" ? (S.movers.list||[]) : [];
+  ml.forEach((c,i)=>{ const ds=c.positions.map(q=>Math.hypot(q.x-gx,q.y-gy)), k=ds.indexOf(Math.min(...ds));
+    if(k>=0) cand.push({kind:"mover", i, d:ds[k], at:c.positions[k]}); });
   cand.sort((a,b)=>a.d-b.d);
   if(cand[0] && cand[0].d<tol*1.3) return cand[0];
   let best=null, bd=tol;
@@ -1623,24 +1679,27 @@ canvas.addEventListener("click", async e=>{
   const hit=hitTest(gx, gy, rect);
   if(S.ctx==="training") return onTrainingHit(hit);
 
-  let pick = hit.kind==="target" ? "target" : hit.kind==="star" ? hit.i : null;
+  let pick = hit.kind==="target" ? "target" : hit.kind==="star" ? hit.i : hit.kind==="mover" ? {x:hit.at.x, y:hit.at.y, mover:hit.i} : null;
   if(pick==null && !S.apiFrames) return toast("Empty sky","Nothing bright enough there. Click right on a dot.");
   if(pick==null) pick={x:gx, y:gy};
   S.selected=pick; S.lastObj=null;
+  // where the selected object really is: the dot's centre, not the click (the server only snaps within 2 px)
+  const at = pick==="target" ? targetPos(S.field,S.epoch) : typeof pick==="number" ? S.field.stars[pick] : pick;
+  const isMover = typeof pick==="object" && pick.mover!=null;
   const click = S.clickId = (S.clickId||0)+1;   // answers for an older click are ignored
   let obj;
   if(S.apiFrames){
-    const c0=fieldCentre(), pa=pixArc(), ddec=(c0.y-gy)*pa/3600, dra=-(gx-c0.x)*pa/3600/Math.cos(S.field.dec*Math.PI/180);
+    const sky=gridToSky(at.x, at.y);
+    S.selSky=sky;   // the selected object's position (field reports, detector switches)
     // Trail and lenses follow the clicked object; clicking the field's own target goes back to it.
-    S.track=null;
-    if(pick==="target") S.trackReq=(S.trackReq||0)+1;
-    else followTrack(S.field.ra+dra, S.field.dec+ddec);
+    S.track=null; S.trackReq=(S.trackReq||0)+1;
+    if(isMover){ const c=S.movers.list[pick.mover]; S.track={positions:moverPath(c), ra:sky.ra, dec:sky.dec, mover:true}; }
+    else if(pick!=="target") followTrack(sky.ra, sky.dec);
     draw();
-    S.selSky={ra:S.field.ra+dra, dec:S.field.dec+ddec};   // clicked position (field reports)
     fileStatus("Checking…", "Looking up how it moves, how it flickers and what it's made of.", true);
     // the first click on a new patch of sky reads every exposure there: say so instead of looking stuck
     const slow=setTimeout(()=>{ if(click===S.clickId) fileStatus("Calculating spectrum…", "First look at this patch of sky: we're reading every SPHEREx exposure of it. This can take up to a minute.", true); }, 6000);
-    try{ obj=await api.object(S.field.ra+dra, S.field.dec+ddec); obj.isTarget = obj.status!=="star"; }
+    try{ obj=await api.object(sky.ra, sky.dec, !isMover); obj.isTarget = obj.status!=="star"; }
     catch(err){ if(click===S.clickId){ fileStatus("No answer", "The archive didn't reply ("+esc(err.message)+"). Tap the dot again."); toast("Archive unreachable", "Tap the dot again."); } return; }
     finally{ clearTimeout(slow); }
     // colour the clicked object on the lens map by its own spectrum (it may be too faint for the per-pixel map)

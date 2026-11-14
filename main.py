@@ -105,6 +105,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "P
 
 from reports import router as reports_router  # noqa: E402  общая таблица находок (/api/reports, /reports)
 app.include_router(reports_router)
+from backup import router as backup_router  # noqa: E402  резервные копии (/api/admin/backup/…)
+app.include_router(backup_router)
 
 PIX_ARCSEC = 6.15
 DIFF_POS = np.array([0xF6, 0xB5, 0x44], float)   # ярче — янтарный
@@ -373,20 +375,39 @@ def _clean(o):
 @app.get("/api/health")
 def health():
     """Liveness check: `ok`, how many fields are held in memory, and the warm-up after a restart.
+    Returns 503 when something essential is broken (reports database, disk), so an uptime monitor alerts.
+    `wise.ok` is false while WiseView (third-party, WISE frames) is down: a warning, not a failure.
 
     `warm.state`: `running` while the demo fields are being loaded, `demo_ready` once every case and
     "Try" field is in memory (the demo is fast from here), `done` when the "Surprise me" fields are
     also saved to disk.
     """
     import shutil
+    from fastapi.responses import JSONResponse
+    import reports as _reports
+    import wise as _wise_mod
+    problems = []
     try:
         du = shutil.disk_usage(CACHE)
         disk = {"free_gb": round(du.free / 1e9, 1), "used_gb": round(du.used / 1e9, 1)}
+        if du.free < 0.3e9:
+            problems.append(f"disk almost full ({du.free / 1e9:.2f} GB free)")
     except OSError:
         disk = None
-    import data
-    return {"ok": True, "cached_fields": len(_SKIES), "warm": dict(_WARM), "disk": disk,
-            "archive": data.archive_status()}     # irsa ok/down, and whether our own AWS index is taking over
+        problems.append("cache disk not readable")
+    try:                                   # отчёты пользователей: база открывается и в неё можно писать
+        from contextlib import closing
+        with closing(_reports._db()) as con:
+            con.execute("BEGIN IMMEDIATE"); con.rollback()
+        reports_ok = True
+    except Exception as e:
+        reports_ok = False
+        problems.append(f"reports database: {e}")
+    body = {"ok": not problems, "problems": problems, "cached_fields": len(_SKIES), "warm": dict(_WARM),
+            "disk": disk, "reports_db": reports_ok, "wise": _wise_mod.status(),
+            "archive": __import__("data").archive_status()}   # irsa ok/down; is our own AWS index taking over
+    # 503 — чтобы внешний монитор (UptimeRobot) прислал тревогу; WISE — сторонний сервис, он только предупреждение
+    return body if not problems else JSONResponse(body, status_code=503)
 
 
 def _det_items(sky: dict, detector: int) -> list:
@@ -694,16 +715,18 @@ def _wise_track(ra: float, dec: float, fra: float, fdec: float, fov: float, fram
 
 
 @app.get("/api/track")
-def track(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked point, degrees (0–360).")],
-          dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the clicked point, degrees (−90…+90).")],
+def track(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected object, degrees (0–360).")],
+          dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the selected object, degrees (−90…+90).")],
           fra: Annotated[float, Query(ge=0, le=360, description="RA of the field centre, degrees (0–360).")],
           fdec: Annotated[float, Query(ge=-90, le=90, description="Dec of the field centre, degrees (−90…+90).")],
           fov: FOV = 0.1, detector: DETECTOR = 4, cadence: CADENCE = "pass", source: SOURCE = "spherex",
-          frame: Annotated[int, Query(ge=0, description="Frame the user clicked on (WISE only: the spot is followed from there).")] = 0):
+          frame: Annotated[int, Query(ge=0, description="Frame the user clicked on (WISE only: the spot is followed from there).")] = 0,
+          snap: Annotated[bool, Query(description="Snap to the nearest source (default). 0 = use the position as given (moving candidates).")] = True):
     """Path of a selected object across the field's frames (fra, fdec, fov, detector), for Trail and lenses.
     With `source=wise` the path is measured on the WISE/NEOWISE frames.
 
-    `ra`, `dec`: where the user clicked; the click snaps to the nearest source.
+    `ra`, `dec`: the selected object's position (the site sends the dot's centre, not the click);
+    it snaps to the nearest source unless `snap=0` (moving candidates).
     `positions` are in the same order as `frames` in `/api/frames` with the same parameters.
     """
     if source == "wise":
@@ -712,7 +735,9 @@ def track(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicke
         sky = _load_sky(fra, fdec, fov, cadence, detector)
     except SkyUnavailable as e:
         raise HTTPException(503, str(e))
-    coord = _snap(sky, SkyCoord(ra, dec, unit="deg"))
+    coord = SkyCoord(ra, dec, unit="deg")
+    if snap:
+        coord = _snap(sky, coord)
     imgs = [f[2] for _, f in _det_items(sky, detector)]
     return {"ra": round(float(coord.ra.deg), 6), "dec": round(float(coord.dec.deg), 6),
             "positions": _track(sky, imgs, coord)}
@@ -767,12 +792,13 @@ def _cached_object(sky: dict, x: float, y: float):
 
 
 @app.get("/api/object")
-def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked point, degrees (0–360).")],
-        dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the clicked point, degrees (−90…+90).")]):
-    """Object card ("Who is it?") for a clicked point: motion, brightness variability, spectrum, molecules,
+def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the selected object, degrees (0–360).")],
+        dec: Annotated[float, Query(ge=-90, le=90, description="Dec of the selected object, degrees (−90…+90).")],
+        snap: Annotated[bool, Query(description="Snap to the nearest source (default). 0 = use the position as given (moving candidates).")] = True):
+    """Object card ("Who is it?") for a selected point: motion, brightness variability, spectrum, molecules,
     catalogue match (test targets, then Gaia DR3, then SIMBAD) and a plain-English verdict.
 
-    The click snaps to the nearest source. A cold request in a new field can take 15–25 s.
+    The point snaps to the nearest source unless `snap=0`. A cold request in a new field can take 15–25 s.
     """
     coord = SkyCoord(ra, dec, unit="deg")
     sky = _sky_containing(ra, dec)
@@ -782,10 +808,11 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked 
         except SkyUnavailable as e:
             raise HTTPException(503, str(e))
 
-    coord = _snap(sky, coord)                         # клик -> центр ближайшего источника
+    if snap:                                          # snap=0: движущийся кандидат, не тянуть к звезде рядом
+        coord = _snap(sky, coord)                     # клик -> центр ближайшего источника
     ox, oy = (float(v) for v in sky["wcs"].world_to_pixel(coord))
     okey = (id(sky), round(ox, 2), round(oy, 2))
-    hit = _cached_object(sky, ox, oy)                 # повторный клик / прогретый объект: без SIMBAD
+    hit = _cached_object(sky, ox, oy) if snap else None   # повторный клик / прогретый объект: без SIMBAD
     if hit is not None:
         return hit
     a = _analysis(sky, coord, online=False)          # движение, спектр (быстро, без сети)
@@ -838,7 +865,8 @@ def obj(ra: Annotated[float, Query(ge=0, le=360, description="RA of the clicked 
         "simbad_url": card["simbad_url"],
     })
     with _LOCK:
-        _OBJECTS[okey] = out
+        if snap:
+            _OBJECTS[okey] = out
         while len(_OBJECTS) > 256:
             _OBJECTS.popitem(last=False)
     return out

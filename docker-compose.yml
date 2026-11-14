@@ -9,6 +9,4 @@ services:
     volumes:
       # новые места неба, скачанные из архива, сохраняются между перезапусками
       - ./cache:/app/cache
-      # таблица находок учеников (reports.py): переживает пересборку контейнера
-      - ./data:/app/data
     restart: unless-stopped

@@ -1,0 +1,58 @@
+# Tests on every push / pull request. Turn on "Wait for CI" in Railway (service -> Settings -> Deploy),
+# then a push to main is deployed only after this workflow passes: broken code never reaches the live site.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"          # same as the Dockerfile
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: pip install -r requirements.txt pytest pytest-playwright
+      - name: API and page checks (no network, no data)
+        run: pytest -q tests --ignore=tests/e2e
+
+      # ---- Playwright end-to-end tests (put them in tests/e2e) ----
+      - name: Start the site for end-to-end tests
+        if: hashFiles('tests/e2e/**') != ''
+        env:
+          SKYWATCH_WARM: "0"
+        run: |
+          nohup uvicorn main:app --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/api/health >/dev/null && exit 0; sleep 1; done
+          cat uvicorn.log; exit 1
+      - name: Playwright (JavaScript/TypeScript specs)
+        if: hashFiles('tests/e2e/**/*.spec.js', 'tests/e2e/**/*.spec.ts') != ''
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          npm i --no-save @playwright/test
+          npx playwright install --with-deps chromium
+          npx playwright test tests/e2e
+      - name: Playwright (Python tests)
+        if: hashFiles('tests/e2e/**/test_*.py') != ''
+        env:
+          BASE_URL: http://127.0.0.1:8000
+        run: |
+          playwright install --with-deps chromium
+          pytest -q tests/e2e --base-url "$BASE_URL" --browser chromium
+      - name: Server log
+        if: failure() && hashFiles('tests/e2e/**') != ''
+        run: cat uvicorn.log || true

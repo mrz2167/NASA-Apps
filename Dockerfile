@@ -17,6 +17,7 @@ RUN pip install -r requirements.txt
 # код и сайт
 COPY *.py API.md ./
 COPY web/ web/
+COPY seed/ seed/
 # Кэш (запросы и вырезки SPHEREx) живёт на постоянном диске Railway, смонтированном в /app/cache:
 # в git его нет, сервер наполняет его сам при первых запросах и сохраняет между деплоями.
 # Локально: docker run -v "$PWD/cache:/app/cache" ...

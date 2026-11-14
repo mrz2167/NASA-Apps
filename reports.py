@@ -6,8 +6,8 @@
     DELETE /api/reports/{id}?key=KEY удалить мусорный отчёт
     страница /reports                таблица для команды (нужен ключ)
 
-Хранилище — SQLite, путь REPORTS_DB (по умолчанию data/reports.db). На Railway файловая система
-сбрасывается при каждом деплое: подключите volume и укажите REPORTS_DB=/data/reports.db.
+Хранилище — SQLite, путь REPORTS_DB (по умолчанию cache/reports.db: на Railway это постоянный диск).
+Резервные копии — backup.py (/api/admin/backup/…), скачивает их scripts/backup.py.
 Список отчётов закрыт ключом: в отчётах могут быть имена пользователей.
 """
 from __future__ import annotations
@@ -28,7 +28,8 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("REPORTS_DB", ROOT / "data" / "reports.db"))
+# по умолчанию — в cache/: на Railway это постоянный диск (volume в /app/cache), деплой его не стирает
+DB_PATH = Path(os.environ.get("REPORTS_DB", ROOT / "cache" / "reports.db"))
 REPORTS_KEY = os.environ.get("REPORTS_KEY", "")
 MOLECULES = ("water", "methane", "co2", "co")
 SAME_OBJECT_DEG = 3 / 3600          # тот же браузер, тот же объект ближе 3″ — не дублируем
@@ -127,8 +128,7 @@ def list_reports(key: str | None = None):
     _require_key(key)
     rows = _all()
     return {"reports": rows, "count": len(rows),
-            "persistent_hint": None if os.environ.get("REPORTS_DB") else
-            "Reports are stored in data/reports.db inside the app. On Railway, mount a volume and set REPORTS_DB."}
+            "persistent_hint": None}
 
 
 @router.get("/api/reports.csv")

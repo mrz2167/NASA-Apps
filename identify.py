@@ -420,6 +420,20 @@ def match_gaia(coord: SkyCoord, table, radius_arcsec: float = 8.0, epoch: float 
             "sep_arcsec": round(float(sep[i]), 2)}
 
 
+CATALOG_TIMEOUT_S = 15.0   # SIMBAD/IRSA for one card: a slow archive must not hang "Who is it?"
+
+
+def _deadline(fn, timeout: float = CATALOG_TIMEOUT_S):
+    """fn() with a hard deadline (pyvo/astroquery set no connect timeout); TimeoutError if too slow."""
+    from data import _TAP_POOL
+    from concurrent.futures import TimeoutError as FutureTimeout
+    fut = _TAP_POOL.submit(fn)
+    try:
+        return fut.result(timeout=timeout)
+    except FutureTimeout:
+        raise TimeoutError(f"catalogue did not answer within {timeout:.0f} s") from None
+
+
 def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool = True) -> dict:
     """Известен ли объект: тестовые объекты -> SIMBAD (зеркало) -> Gaia DR3."""
     info = {"found": False, "name": "Unknown object", "otype": "", "source": None,
@@ -437,7 +451,7 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
     try:
         s = simbad()
         s.add_votable_fields("otype")
-        res = s.query_region(coord, radius=radius_arcsec * u.arcsec)
+        res = _deadline(lambda: s.query_region(coord, radius=radius_arcsec * u.arcsec))
         if res is not None and len(res) > 0:
             cols = {c.lower(): c for c in res.colnames}
             r0 = res[0]
@@ -455,7 +469,7 @@ def _check_catalogs(coord: SkyCoord, radius_arcsec: float = 15.0, online: bool =
         pass
 
     try:
-        t = gaia_cone(coord, radius_arcsec, top=1)
+        t = _deadline(lambda: gaia_cone(coord, radius_arcsec, top=1))
         if t is not None and len(t):
             m = match_gaia(coord, t, radius_arcsec)
             if m:
