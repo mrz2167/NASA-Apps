@@ -73,6 +73,23 @@ async def _unexpected_error(request: Request, exc: Exception):
         "detail": "Internal server error while processing SPHEREx data. Please try again or pick another field."})
 
 
+class FieldUnavailable(HTTPException):
+    """503 for a field that can't be built now. The body keeps the readable `detail` and adds a stable `code`:
+    `archive_down` when NASA's archive (IRSA) isn't answering, so the site can offer WISE and the nearest
+    ready fields instead of a dead end; `no_data` for the rest (not observed yet, too few images)."""
+
+    def __init__(self, e: Exception):
+        msg = str(e)
+        low = msg.lower()
+        self.code = "archive_down" if ("not responding" in low or "unavailable" in low) else "no_data"
+        super().__init__(503, msg)
+
+
+@app.exception_handler(FieldUnavailable)
+async def _field_unavailable(request: Request, exc: FieldUnavailable):
+    return JSONResponse(status_code=503, content={"detail": exc.detail, "code": exc.code})
+
+
 # Общие параметры запросов (ограничения видны в /docs)
 RA = Annotated[float, Query(ge=0, le=360, description="Right ascension of the field centre, degrees (0–360, ICRS).")]
 DEC = Annotated[float, Query(ge=-90, le=90, description="Declination of the field centre, degrees (−90…+90, ICRS).")]
@@ -367,7 +384,9 @@ def health():
         disk = {"free_gb": round(du.free / 1e9, 1), "used_gb": round(du.used / 1e9, 1)}
     except OSError:
         disk = None
-    return {"ok": True, "cached_fields": len(_SKIES), "warm": dict(_WARM), "disk": disk}
+    import data
+    return {"ok": True, "cached_fields": len(_SKIES), "warm": dict(_WARM), "disk": disk,
+            "archive": data.archive_status()}     # irsa ok/down, and whether our own AWS index is taking over
 
 
 def _det_items(sky: dict, detector: int) -> list:
@@ -417,7 +436,7 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
     try:
         sky = _load_sky(ra, dec, fov, cadence, detector)
     except SkyUnavailable as e:
-        raise HTTPException(503, str(e))
+        raise FieldUnavailable(e)             # 503 with code "archive_down" when IRSA is not answering
 
     items = _det_items(sky, detector)
     info = sky.get("info") or []
@@ -910,6 +929,60 @@ def surprises():
     """Names of the "Surprise me" fields the server can show right now (built and saved). The site picks
     only from these, so a dead archive never lands a visitor on a field that can't load."""
     return {"ready": sorted(_READY_SURPRISES), "warm": _WARM.get("state")}
+
+
+def _ready_fields() -> list[tuple[float, float, float]]:
+    """(ra, dec, fov) of every per-pass SPHEREx field this server can show without the archive:
+    held in memory or saved on disk (skycache). Only looks at keys and file names, loads nothing."""
+    import time
+    with _LOCK:
+        keys = [k for k in _SKIES if len(k) == 5 and k[3] == "pass"]
+    out = [(float(k[0]), float(k[1]), float(k[2])) for k in keys]
+    if skycache.ENABLED:
+        try:
+            now = time.time()
+            for f in skycache.DIR.glob(f"*_pass_None_{skycache.CODE_HASH}.pkl"):
+                if now - f.stat().st_mtime > skycache.MAX_AGE_S:
+                    continue
+                try:   # "133p7598_m7p2422_0p1_pass_None_<hash>" -> 133.7598, -7.2422, 0.1 (see skycache._path)
+                    out.append(tuple(float(x.replace("m", "-").replace("p", ".")) for x in f.stem.split("_")[:3]))
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+    return out
+
+
+def _sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    import math
+    a1, d1, a2, d2 = (math.radians(v) for v in (ra1, dec1, ra2, dec2))
+    h = math.sin((d2 - d1) / 2) ** 2 + math.cos(d1) * math.cos(d2) * math.sin((a2 - a1) / 2) ** 2
+    return math.degrees(2 * math.asin(min(1.0, math.sqrt(h))))
+
+
+_NAMED: list = []          # (name, ra, dec) of the demo and "Surprise me" fields, read once
+
+
+@app.get("/api/nearest")
+def nearest(ra: RA, dec: DEC, n: Annotated[int, Query(ge=1, le=10, description="How many fields to return.")] = 3):
+    """The nearest SPHEREx fields this server already has built (in memory or on disk), closest first.
+
+    For when the archive is down and a new field can't be built: these open at once. Each item has `ra`,
+    `dec`, `fov`, `distance_deg` and a `name` when the field is one of the site's named targets (else null).
+    Nothing is built or downloaded here.
+    """
+    if not _NAMED:
+        _NAMED.extend(WARM_FIELDS + _surprise_fields())
+    best: dict = {}
+    for fra, fdec, ffov in sorted(_ready_fields(), key=lambda f: abs(f[2] - 0.1)):   # one per position, 0.1° first
+        best.setdefault((round(fra, 3), round(fdec, 3)), (fra, fdec, ffov))
+    out = []
+    for fra, fdec, ffov in best.values():
+        name = next((nm for nm, nra, ndec in _NAMED if _sep_deg(fra, fdec, nra, ndec) < 0.01), None)
+        out.append({"name": name, "ra": fra, "dec": fdec, "fov": ffov,
+                    "distance_deg": round(_sep_deg(ra, dec, fra, fdec), 2)})
+    out.sort(key=lambda f: f["distance_deg"])
+    return {"fields": out[:n]}
 
 
 @app.on_event("startup")

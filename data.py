@@ -55,7 +55,36 @@ TAP_TIMEOUT_S = float(os.environ.get("SKYWATCH_TAP_TIMEOUT", "40"))
 _TAP_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="tap")   # timed-out calls keep a thread ~2 min
 
 
-def _tap(query: str, retries: int = 2) -> Table:
+TAP_RETRY_AFTER_S = 600.0
+_tap_down_until = 0.0
+
+
+def _index_on() -> bool:
+    if os.environ.get("SKYWATCH_NO_INDEX") == "1":
+        return False
+    import s3index
+    return s3index.available()
+
+
+def _from_index(ra: float, dec: float, size_deg: float) -> Table | None:
+    """Список экспозиций из своего индекса AWS (не пишется в cache/queries: ответ IRSA полнее)."""
+    import s3index
+    try:
+        t = s3index.find(ra, dec, size_deg)
+    except Exception:
+        logging.getLogger("skywatch").exception("s3index.find failed")
+        return None
+    return t if t is not None and len(t) else None
+
+
+def archive_status() -> dict:
+    """Для /api/health: откуда сейчас берётся список экспозиций."""
+    down = _time.time() < _tap_down_until
+    return {"irsa": "down" if down else "ok", "aws_index": _index_on(),
+            "search": "aws-index" if down and _index_on() else "irsa"}
+
+
+def _tap(query: str, retries: int = 2, timeout: float | None = None) -> Table:
     """IRSA TAP query with a hard deadline per attempt.
 
     pyvo sets no connect timeout, so an unreachable IRSA hangs ~2 min per attempt on Linux; with the old
@@ -67,9 +96,9 @@ def _tap(query: str, retries: int = 2) -> Table:
     for attempt in range(retries):
         fut = _TAP_POOL.submit(lambda: Irsa.query_tap(query).to_table())
         try:
-            return fut.result(timeout=TAP_TIMEOUT_S)
+            return fut.result(timeout=timeout or TAP_TIMEOUT_S)
         except FutureTimeout:
-            err = TimeoutError(f"IRSA did not answer within {TAP_TIMEOUT_S:.0f} s")
+            err = TimeoutError(f"IRSA did not answer within {timeout or TAP_TIMEOUT_S:.0f} s")
         except Exception as e:
             err = e
         if attempt == retries - 1:
@@ -125,7 +154,23 @@ def find_images(ra: float, dec: float, size_deg: float = 0.1, use_cache: bool = 
       AND a.producttype = 'science'
     ORDER BY p.time_bounds_lower
     """
-    raw = _tap(query)
+    # IRSA молчит -> свой список покрытия по бакету AWS (s3index.py). Пока IRSA лежит, не ждём его
+    # каждый раз: после сбоя TAP_RETRY_AFTER_S секунд идём сразу в список.
+    global _tap_down_until
+    have_index = _index_on()
+    if have_index and _time.time() < _tap_down_until:
+        t = _from_index(ra, dec, size_deg)
+        if t is not None:
+            return t
+    try:
+        raw = _tap(query, retries=1 if have_index else 2, timeout=min(TAP_TIMEOUT_S, 15.0) if have_index else None)
+    except Exception:
+        _tap_down_until = _time.time() + TAP_RETRY_AFTER_S
+        t = _from_index(ra, dec, size_deg) if have_index else None
+        if t is None:
+            raise
+        return t
+    _tap_down_until = 0.0
 
     rows = {}
     for r in raw:
@@ -178,6 +223,8 @@ def _download(url: str, dest: Path, retries: int = 3) -> None:
             except Exception as e:
                 last = e
                 _time.sleep(1 + attempt)
+        if _time.time() < _tap_down_until:      # IRSA лежит: его сервис вырезок провисит минуты на каждом файле
+            raise last
         print(f"  ! AWS did not return the cutout ({last}); trying the IRSA service")
     for attempt in range(retries):
         try:

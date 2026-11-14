@@ -163,6 +163,13 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;pa
 .scalebar i{display:block;height:2px;background:var(--paper)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;color:var(--muted)}
 .empty .display{font-size:22px;color:var(--paper)}
+.empty.alt{padding:26px 14px 22px;gap:8px;justify-content:safe center;overflow-y:auto}   /* archive down: WISE + nearest ready fields */
+.empty.alt .display{font-size:19px}
+.empty.alt #errText{font-size:13px;line-height:1.4;max-width:420px}
+.empty.alt .btn{padding:9px 16px;font-size:13px}
+.err-alt{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-width:100%}
+.err-alt .chip{color:var(--paper);max-width:100%;padding:6px 12px}
+@media (max-width:520px){.empty.alt{gap:6px}.empty.alt .display{font-size:17px}.empty.alt #errText{font-size:12px}.empty.alt .btn{padding:8px 16px}}
 .loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(7,10,32,.7);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
 .loading.on{display:flex}
 .plates{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
@@ -379,6 +386,7 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
           <div class="empty" id="errState" style="display:none">
             <div class="display">The archive didn't answer.</div>
             <div id="errText">No frames came back for this patch.</div>
+            <div class="err-alt" id="errAlt" hidden></div>
             <button class="btn btn-amber" id="retryBtn">↻ Try again</button>
           </div>
           <div class="loading" id="loading">Pulling frames from the archive…</div>
@@ -1209,9 +1217,10 @@ const api = {
     const ac = timeoutMs && typeof AbortController!=="undefined" ? new AbortController() : null;
     const tm = ac ? setTimeout(()=>ac.abort(), timeoutMs) : null;
     try{ const r=await fetch(u, ac?{signal:ac.signal}:{});
-      if(!r.ok){ let d=""; try{ d=(await r.json()).detail||""; }catch(_){} throw new Error(d ? String(d).slice(0,160) : r.status); }   // the server explains, e.g. "IRSA is not responding"
+      if(!r.ok){ let d="", code=""; try{ const j=await r.json(); d=j.detail||""; code=j.code||""; }catch(_){}
+        throw Object.assign(new Error(d ? String(d).slice(0,160) : r.status), {code}); }   // the server explains, e.g. "IRSA is not responding"; code "archive_down" = NASA's archive is not answering
       return await r.json(); }
-    catch(e){ throw ac && ac.signal.aborted ? new Error("no answer in "+Math.round(timeoutMs/1000)+" s") : e; }
+    catch(e){ throw ac && ac.signal.aborted ? Object.assign(new Error("no answer in "+Math.round(timeoutMs/1000)+" s"), {code:"timeout"}) : e; }
     finally{ if(tm) clearTimeout(tm); }
   },
   frames(ra,dec,fov,det,mode,cad,src){ return this.get("/api/frames",{ra,dec,fov,detector:det,mode,cadence:cad||S.cadence,source:src||S.survey}, 180000); },   // cold fields take 15–90 s (right after a deploy the cache is empty)
@@ -1413,9 +1422,33 @@ function checkCoords(ra, dec, fov, quiet){
 function scanFailed(err, args){
   $("loading").classList.remove("on"); stop(); S.field=null; S.apiFrames=null; S.frames=[];
   const W=canvas.width; ctx.fillStyle="#070A20"; ctx.fillRect(0,0,W,W); $("hudEpoch").textContent="—"; $("frameCap").textContent="—";
-  $("errText").textContent=`No frames came back (${err.message||"network error"}). The archive can be slow or busy; try again in a moment.`;
+  const alt=$("errAlt"), down = S.ctx==="free" && S.survey==="spherex" && (err.code==="archive_down" || err.code==="timeout");
+  alt.hidden=true; alt.innerHTML=""; $("errState").classList.toggle("alt", down); $("retryBtn").className="btn btn-amber";
+  $("errText").textContent = down ? "NASA's SPHEREx archive (IRSA) is not answering right now, and this spot of sky isn't stored on our server yet."
+    : `No frames came back (${err.message||"network error"}). The archive can be slow or busy; try again in a moment.`;
   $("errState").style.display=""; $("retryBtn").onclick=()=>scan(...args);
-  toast("Archive didn't answer", "No frames for this patch. Tap “Try again” or scan another one.");
+  if(down){ archiveDown(args); toast("SPHEREx archive is down", "See this spot in WISE, or open a field we already have."); }
+  else toast("Archive didn't answer", "No frames for this patch. Tap “Try again” or scan another one.");
+}
+// The archive is down and this field isn't stored on the server: offer the same spot in WISE (which doesn't
+// need IRSA) and the nearest fields the server already has (/api/nearest). Free exploration only.
+function archiveDown(args){
+  const alt=$("errAlt"), myScan=S.scanId, [ra, dec, fov]=args;
+  const wiseBtn=document.createElement("button"); wiseBtn.className="btn btn-amber"; wiseBtn.id="errWise"; wiseBtn.textContent="See this spot in WISE 2010–24";
+  wiseBtn.onclick=()=>{ $("survSeg").querySelector('[data-s="wise"]').click(); scan(...args); };   // the usual survey switch (plates, hints), then the same scan
+  alt.appendChild(wiseBtn); alt.hidden=false; $("retryBtn").className="btn btn-ghost";
+  api.get("/api/nearest",{ra,dec},8000).then(d=>{
+    if(S.scanId!==myScan || $("errState").style.display==="none") return;   // the student has moved on
+    for(const f of (d.fields||[]).slice(0,3)){
+      const dist=+f.distance_deg, b=document.createElement("button"); b.className="chip";
+      b.textContent=`Open ${f.name || `RA ${(+f.ra).toFixed(2)}°, Dec ${f.dec<0?"−":"+"}${Math.abs(f.dec).toFixed(2)}°`} · ${dist<10?dist.toFixed(1):Math.round(dist)}° away`;
+      b.onclick=()=>{
+        const fv=clampFov(f.fov||fov), key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-f.ra)<.01&&Math.abs(TARGETS[k].dec-f.dec)<.01)||null;
+        $("raIn").value=f.ra; $("decIn").value=f.dec; $("fovIn").value=String(fv); freeTitle(); scan(f.ra, f.dec, fv, key);
+      };
+      alt.appendChild(b);
+    }
+  }).catch(()=>{});   // no list: the WISE button alone
 }
 // Loads real frames for the current field. Returns false (and changes nothing) if a newer scan or
 // detector/cadence switch started meanwhile; throws only if this request is still the current one.
