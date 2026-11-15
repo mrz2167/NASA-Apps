@@ -598,6 +598,12 @@ const SIGN = 0.2; // molecule index above this = "sign"
 const signOf = k => k==="methane" ? 0.15 : SIGN;
 // band + continuum windows the server measures (spectrum.BANDS); no spectrum points there = not measured, not "none"
 const MOL_WIN = {water:[[2.8,3.1],[2.2,2.4],[3.6,3.8]], methane:[[3.2,3.4],[2.9,3.0],[3.9,4.0]], co2:[[4.2,4.35],[4.0,4.1],[4.45,4.55]], co:[[4.55,4.8],[4.45,4.5],[4.85,4.95]]};
+// "sign" only when the index passes the threshold AND is > 3σ of its own error (server: molecules_snr);
+// "unsure" = above the threshold but within noise (WISE 0855 methane, 1.4σ); "nodata" = band not covered
+function molState(mol, snr, k, o){ const v=(mol||{})[k]||0, s=snr?snr[k]:undefined;
+  if((snr && s===null) || (o && !molMeasured(o,k))) return "nodata";
+  if(v<signOf(k)) return "none"; if(s!=null && s<3) return "unsure"; return "sign"; }
+const molSign=(o,k)=>molState(o?.molecules,o?.molecules_snr,k,o)==="sign";
 function molMeasured(o,k){ const wl=o?.spectrum?.wavelength; if(!wl) return !o?.spectrum; const has=([a,b])=>wl.some(l=>l>a&&l<b); const [band,...cont]=MOL_WIN[k]; return has(band)&&cont.some(has); }
 const EPOCHS = ["2025 · Survey 1","2025–26 · Survey 2","2026 · Survey 3","2026 · Latest"];
 
@@ -678,9 +684,9 @@ const CASES = [
   {id:"c2", level:7, target:"wise0855", title:"The Coldest Ghost",
    brief:"Something about as cold as a frosty day on Earth is drifting past the Sun's neighbours. In short-wavelength light it barely exists. Change your eyes.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"d1",t:"Look with Detector 1 (0.75–1.09 µm). See it?",ev:"detector",val:1},
-          {id:"d6",t:"Now Detector 6 (4.42–5.00 µm)",ev:"detector",val:6},{id:"ch4",t:"Turn on the Methane lens",ev:"lens",val:"methane"},
+          {id:"d6",t:"Now Detector 6 (4.42–5.00 µm)",ev:"detector",val:6},{id:"h2o",t:"Turn on the Water lens",ev:"lens",val:"water"},
           {id:"sel",t:"Open its file and read the spectrum",ev:"selectTarget"}],
-   closing:"Invisible in one colour, bright in another, with a methane dip. That's how cold brown dwarfs give themselves away.",
+   closing:"Invisible in one colour, bright in another, with a deep water dip. That's how cold brown dwarfs give themselves away.",
    fact:"WISE 0855−0714 is the coldest brown dwarf known, about Earth's own temperature, from frosty to cool (around 250–285 K). Kevin Luhman discovered it in 2014, a year after finding Luhman 16, by its motion in WISE images."},
   {id:"c3", level:8, target:"epsindib", title:"Twins Too Close To Split",
    brief:"Two brown dwarfs orbit each other far closer than one SPHEREx pixel. You will never see two dots. Prove they're cold anyway.",
@@ -1444,9 +1450,10 @@ function drawOverlays(){
   if(tt && S.lens!=="none" && !f.exam){
     const tp=objPos(f,tt,S.epoch), p=toCanvas(tp.x,tp.y);
     const mol = tt===f.target ? (tt.mol||{}) : (S.lastObj?.molecules||{});
+    const ms=molState(mol, tt===f.target ? tt.snr : S.lastObj?.molecules_snr, S.lens, tt===f.target ? null : S.lastObj);
     const sc=mol[S.lens]||0, col=MOLS[S.lens].color, cl=(tt===f.target && tt.cloud)||1;
     ctx.save();
-    if(sc>=signOf(S.lens)){
+    if(ms==="sign"){
       const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,px*4.5*cl);
       g.addColorStop(0,col+"cc"); g.addColorStop(.5,col+"44"); g.addColorStop(1,col+"00");
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,px*4.5*cl,0,7); ctx.fill();
@@ -1455,7 +1462,7 @@ function drawOverlays(){
     } else if(S.lensMaps?.field!==f){   // with the per-pixel map on (fill or outline), the map speaks for itself
       ctx.setLineDash([4,4]); ctx.strokeStyle="rgba(243,238,228,.5)"; ctx.beginPath(); ctx.arc(p.x,p.y,px*2.6,0,7); ctx.stroke();
       const checking = tt!==f.target && !S.lastObj;   // the clicked object's spectrum is still loading
-      label(checking ? `${MOLS[S.lens].sym} · checking…` : (tt!==f.target && !molMeasured(S.lastObj,S.lens)) ? `${MOLS[S.lens].sym} · no data` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
+      label(checking ? `${MOLS[S.lens].sym} · checking…` : ms==="nodata" ? `${MOLS[S.lens].sym} · no data` : ms==="unsure" ? `${MOLS[S.lens].sym} · within noise ${sc.toFixed(2)}` : `NO ${MOLS[S.lens].sym} SIGN`, p.x+px*3, p.y-px*3, "#F3EEE4");
     }
     ctx.restore();
   }
@@ -1647,7 +1654,7 @@ async function loadApiFrames(){
   S.epoch=Math.min(S.epoch, data.frames.length-1);   // frame count differs per detector and cadence
   f.stars=(data.sources||[]).map(s=>({x:s.x, y:s.y, f:1, det:[1,1,1,1,1,1], id:s.id||"Source"}));
   const key=f.target?.key||null;
-  f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}} : null;
+  f.target = data.target ? {key, positions:data.target.positions, mol:data.target.molecules||{}, snr:data.target.molecules_snr||null} : null;
   loadMovers();
   return true;
 }
@@ -1878,8 +1885,8 @@ function verdict(o){
   if(vr>=1.5 && !mv) return ["Variable star","Brightness changes, position steady."];
   if(isFaint(o)) return ["Nothing measurable here","Too faint to measure its motion or spectrum. Try a brighter dot."];
   if(isUnmatchedStar(o)) return ["Faint background source","Steady and still, too faint for the catalogues. Not a discovery: discoveries move or change."];
-  if(mv && m.methane>=signOf("methane")) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
-  if(mv && m.water>=.3) return ["Possibly a brown dwarf","Moves, with a strong water dip. Worth a closer look."];
+  if(mv && molSign(o,"methane")) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
+  if(mv && m.water>=.3 && molState(o.molecules,o.molecules_snr,"water",o)!=="unsure") return ["Possibly a brown dwarf","Moves, with a strong water dip. Worth a closer look."];
   if(mv) return ["Nearby star on the move","High proper motion, no cold-world chemistry."];
   return ["Background star","Steady and still. Far away, and fine with it."];
 }
@@ -1891,8 +1898,8 @@ function renderFile(o){
   const statusTxt=catWait ? (o.catalog_status==="pending" ? "CHECKING CATALOGUES…" : "CATALOGUES NOT ANSWERING") : {known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
   const pm=o.motion||{}, arrow = pm.pa_deg!=null && isMoving(o) ? `<span class="arrow" style="transform:rotate(${-pm.pa_deg}deg)">↑</span> ${compass(pm.pa_deg)}` : "—";
   const cat = pm.catalog_arcsec_per_yr ? ` <span style="color:var(--muted-ink)">· catalogue ${pm.catalog_arcsec_per_yr}″/yr</span>` : "";
-  const mols=Object.keys(MOLS).map(k=>{ const meas=molMeasured(o,k), v=meas?Math.max(0,o.molecules?.[k]||0):0, sign=v>=signOf(k);
-    return `<div class="mol"><span><b>${MOLS[k].sym}</b> ${MOLS[k].label!==MOLS[k].sym?MOLS[k].label:""}</span><span class="bar"><i style="width:${Math.min(100,v*130)}%;background:${MOLS[k].color}"></i></span><span class="tag" style="color:${sign?MOLS[k].color:"var(--muted-ink)"}">${!meas?"NO DATA":sign?"SIGN":"NONE"}</span></div>`; }).join("");
+  const mols=Object.keys(MOLS).map(k=>{ const st=molState(o.molecules,o.molecules_snr,k,o), meas=st!=="nodata", v=meas?Math.max(0,o.molecules?.[k]||0):0, sign=st==="sign";
+    return `<div class="mol"><span><b>${MOLS[k].sym}</b> ${MOLS[k].label!==MOLS[k].sym?MOLS[k].label:""}</span><span class="bar"><i style="width:${Math.min(100,v*130)}%;background:${MOLS[k].color}"></i></span><span class="tag" style="color:${sign?MOLS[k].color:"var(--muted-ink)"}">${!meas?"NO DATA":sign?"SIGN":st==="unsure"?"UNSURE":"NONE"}</span></div>`; }).join("");
   const inL5 = S.ctx==="training" && S.level===5;
   $("file").innerHTML = `
     <span class="label">Who is it?</span>
@@ -1970,7 +1977,7 @@ async function openReport(o){
   yy+=80; const [vt]=verdict(o);
   txt(g,vt,80,yy,"600 32px Manrope","#F07A3A");
   const f=S.field; const rows=[["FIELD", train && !f.exam?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
-    ["CHEMISTRY", o.nospec ? "not measured (WISE photos)" : (Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=signOf(k)).map(k=>MOLS[k].sym).join("  ·  ")||(Object.keys(MOLS).some(k=>molMeasured(o,k))?"no clear signs":"not measured (star too bright)"))],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
+    ["CHEMISTRY", o.nospec ? "not measured (WISE photos)" : (Object.keys(MOLS).filter(k=>molSign(o,k)).map(k=>MOLS[k].sym).join("  ·  ")||(Object.keys(MOLS).some(k=>molMeasured(o,k))?"no clear signs":"not measured (star too bright)"))],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
   yy+=70; for(const [k,v] of rows){ txt(g,k,80,yy,"600 18px Manrope","rgba(243,238,228,.5)",5); txt(g,v,330,yy,"400 28px Manrope","#F3EEE4"); yy+=58; }
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;

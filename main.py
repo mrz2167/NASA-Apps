@@ -615,8 +615,9 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
         base = sky if cadence == "pass" else _load_sky(ra, dec, fov)
         a = _analysis(base, base["coord"])
         molecules = a["scores"] or None
+        mol_snr = _mol_snr(a)
     except Exception:
-        molecules = None
+        molecules, mol_snr = None, None
     _precache(sky, imgs[-1], detector)        # object cards of the centre and the brightest dots, in the background
 
     return _clean({
@@ -625,7 +626,7 @@ def frames(ra: RA, dec: DEC, fov: FOV = 0.1, detector: DETECTOR = 4, mode: MODE 
         "frames": out_frames,
         "diff": out_diff,
         "sources": _sources(imgs[-1], sky=sky),
-        "target": {"positions": positions, "molecules": molecules},
+        "target": {"positions": positions, "molecules": molecules, "molecules_snr": mol_snr},
         "meta": {"source": sky["source"], "n_images": sky["n_loaded"], "warnings": sky["warnings"],
                  "wavelength_um": [info[i]["wavelength_um"] for i, _ in items] if info else None,
                  "n_exposures": [info[i]["n_exposures"] for i, _ in items] if info else None,
@@ -706,8 +707,12 @@ def _paint_from_spectrum(sky: dict, maps: dict, coord: SkyCoord) -> dict:
     Для объектов, слишком тусклых для попиксельной карты; измеренные пиксели не перекрываются.
     """
     from lens import paint_object
+    from spectrum import MIN_SNR
     c = _snap(sky, coord)
-    scores = _analysis(sky, c)["scores"] or {}
+    a = _analysis(sky, c)
+    snr = _mol_snr(a) or {}
+    # only significant signs are painted: a noisy index (WISE 0855 methane, 1.4σ) would draw a false spot
+    scores = {k: v for k, v in (a["scores"] or {}).items() if (snr.get(k) or 0) >= MIN_SNR}
     if not any(v > 0 for v in scores.values()):
         return maps
     x, y = (float(v) for v in sky["wcs"].world_to_pixel(c))
@@ -918,6 +923,16 @@ def track(ra: Annotated[float, Query(ge=0, le=360, description="RA of the select
 
 _ANALYSES: "OrderedDict[tuple, dict]" = OrderedDict()
 TARGET_NAMES_EN: dict[str, str] = {}   # названия тестовых объектов в targets.py уже английские
+
+
+def _mol_snr(a: dict) -> dict | None:
+    """Significance of each molecule index (index / error); None per molecule = not measured."""
+    from spectrum import molecule_snr
+    sp = a.get("spectrum") or {}
+    try:
+        return molecule_snr(sp.get("wavelength") or [], sp.get("flux") or [], sp.get("error") or [])
+    except Exception:
+        return None
 
 
 def _analysis(sky: dict, coord: SkyCoord, online: bool = False) -> dict:
@@ -1170,6 +1185,7 @@ def _object(ra: float, dec: float, snap: bool = True, wait_s: float = 6.0, sky: 
         },
         "variability": {"ratio": ratio, "label": v.get("label"), "is_variable": v.get("is_variable", False)},
         "molecules": a["scores"] or {"water": 0.0, "methane": 0.0, "co2": 0.0, "co": 0.0},
+        "molecules_snr": _mol_snr(a),
         "spectrum": a["spectrum"],
         "verdict": card["verdict"],
         "simbad_url": card["simbad_url"],

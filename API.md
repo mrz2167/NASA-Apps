@@ -75,7 +75,8 @@ Everything about the object at a sky position. The frontend converts the clicked
   "catalog": "SIMBAD · WISE J085510.83−071442.5 · Y4",
   "motion": {"arcsec_per_yr": 8.0, "pa_deg": 275, "catalog_arcsec_per_yr": 8.1},
   "variability": {"ratio": 1.0},
-  "molecules": {"water": 0.42, "methane": 0.61, "co2": 0.08, "co": 0.22},
+  "molecules": {"water": 0.477, "methane": 0.205, "co2": 0.0, "co": 0.0},
+  "molecules_snr": {"water": 12.0, "methane": 1.4, "co2": -1.8, "co": -1.3},
   "spectrum": {
     "wavelength": [0.75, 0.79, 0.83],
     "flux": [0.001, 0.002, 0.002],
@@ -95,7 +96,8 @@ Field by field:
 | `motion.pa_deg` | Direction, degrees east of north (0 = N, 90 = E) | identify.py |
 | `motion.catalog_arcsec_per_yr` | Catalogue value for comparison, or `null` | identify.py |
 | `variability.ratio` | max / min flux across epochs (1.0 = steady) | identify.py |
-| `molecules` | Absorption index 0–1 per molecule; ≥ 0.2 shows as "SIGN" | molecules.py |
+| `molecules` | Absorption index 0–1 per molecule (0 also when not measured; see `molecules_snr`) | spectrum.py |
+| `molecules_snr` | Index divided by its error, per molecule; `null` = no spectrum points in the band or its continuum. The site shows "SIGN" only for index ≥ 0.2 (methane 0.15) **and** ≥ 3σ; above the threshold but below 3σ is "UNSURE" | spectrum.py |
 | `spectrum` | One point per SPHEREx exposure, wavelength in µm, any flux unit | spectrum.py |
 
 The frontend writes the verdict itself from these numbers (moving + methane → "Looks like a cold brown dwarf", varies but still → "Variable star", etc.).

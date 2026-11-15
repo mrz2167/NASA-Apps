@@ -172,6 +172,36 @@ def molecule_scores(wl: np.ndarray, flux: np.ndarray) -> dict[str, float]:
     return scores
 
 
+MIN_SNR = 3.0   # индекс считается признаком, только если он больше 3σ своей погрешности
+
+
+def molecule_snr(wl, flux, err) -> dict[str, float | None]:
+    """Значимость индекса каждой молекулы: индекс / его погрешность (по ошибкам точек спектра).
+
+    None — в полосе или континууме нет ни одной точки (не измерено). Погрешность медианы ≈ 1.25·σ/√n.
+    """
+    wl, flux, err = (np.asarray(v, float) for v in (wl, flux, err))
+    out: dict[str, float | None] = {}
+    for name, b in BANDS.items():
+        m = (wl > b["band"][0]) & (wl < b["band"][1])
+        cm = np.zeros_like(m)
+        for lo, hi in b["cont"]:
+            cm |= (wl > lo) & (wl < hi)
+        if not m.any() or not cm.any():
+            out[name] = None
+            continue
+        fb, fc = np.nanmedian(flux[m]), np.nanmedian(flux[cm])
+        eb = 1.2533 * np.sqrt(np.nanmean(err[m] ** 2) / m.sum())
+        ec = 1.2533 * np.sqrt(np.nanmean(err[cm] ** 2) / cm.sum())
+        if not (np.isfinite(fc) and fc > 0 and np.isfinite(fb)):
+            out[name] = None
+            continue
+        sig = float(np.hypot(eb / fc, fb * ec / fc ** 2))
+        idx = 1.0 - fb / fc
+        out[name] = round(float(idx / sig), 1) if sig > 0 and np.isfinite(sig) else None
+    return out
+
+
 if __name__ == "__main__":
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context
