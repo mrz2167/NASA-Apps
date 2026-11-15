@@ -533,7 +533,7 @@ def health():
         problems.append(f"reports database: {e}")
     body = {"ok": not problems, "problems": problems, "cached_fields": len(_SKIES), "warm": dict(_WARM),
             "disk": disk, "reports_db": reports_ok, "wise": _wise_mod.status(),
-            "archive": __import__("data").archive_status()}   # irsa ok/down; is our own AWS index taking over
+            "archive": dict(__import__("data").archive_status(), watch=dict(_IRSA_WATCH))}   # irsa ok/down; is our own AWS index taking over
     body["cleanup"] = cleanup.status()     # old visitor fields freed when the disk runs low (cleanup.py)
     # 503 — чтобы внешний монитор (UptimeRobot) прислал тревогу; WISE — сторонний сервис, он только предупреждение
     return body if not problems else JSONResponse(body, status_code=503)
@@ -1352,15 +1352,23 @@ def resolve(name: Annotated[str, Query(min_length=1, max_length=80, description=
 
 
 # ---------- IRSA watchdog: know that NASA's archive is down before a visitor has to wait for it ----------
+_IRSA_WATCH: dict = {}
+
+
 def _irsa_watch() -> None:
     import time
     import requests
     import data
     while True:
-        try:
-            requests.get("https://irsa.ipac.caltech.edu/TAP/sync", params={"QUERY": "SELECT 1", "FORMAT": "csv"}, timeout=8)
-        except Exception:                                         # no connection: skip IRSA for the next 10 min
+        try:                                                      # a real answer to a real query, not just any reply
+            r = requests.get("https://irsa.ipac.caltech.edu/TAP/sync", timeout=10,
+                             params={"QUERY": "SELECT TOP 1 planeid FROM spherex.plane", "FORMAT": "csv"})
+            healthy = r.status_code == 200 and "planeid" in r.text[:200].lower()
+        except Exception:
+            healthy = False
+        if not healthy:                                           # skip IRSA for the next 10 min
             data._tap_down_until = max(data._tap_down_until, time.time() + data.TAP_RETRY_AFTER_S)
+        _IRSA_WATCH.update(checked=round(time.time()), healthy=healthy)
         time.sleep(120)
 
 
