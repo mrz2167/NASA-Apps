@@ -107,6 +107,19 @@ Python (FastAPI, Astropy, Astroquery, NumPy, SciPy, Reproject, Photutils) on the
 | `API.md` | API reference |
 | `tests/` | automated tests |
 
+## AI use
+
+We used AI assistance, Anthropic's **Claude** (through Claude Code), while building this project.
+
+- **What AI helped with:** writing and debugging parts of the code (server, data pipeline, web page), drafting interface text and documentation, and translating the interface into Russian and Uzbek.
+- **What the team did:** the idea and the learning design (levels and cases), choosing the data and methods, checking every scientific result against real catalogues (see *Validation*), testing the site, and the final decisions on what went in.
+- **What is not AI-generated:** all sky images, spectra, motions and brightness measurements come from real NASA SPHEREx and WISE/NEOWISE data and from the Gaia DR3 and SIMBAD catalogues. No image or measurement shown on the site was created by AI.
+- **Where this is marked:**
+  - a disclosure comment at the top of every source file;
+  - `generator` and `ai-disclosure` meta tags in the web pages;
+  - a line in the site footer;
+  - `Co-Authored-By: Claude` trailers on AI-assisted commits.
+
 ## Acknowledgements
 
 This project uses data from **SPHEREx**, a NASA mission, served by **NASA/IPAC IRSA** and the NASA Open Data on AWS programme. It also uses data from **WISE/NEOWISE**, the unTimely catalogue and the **Backyard Worlds: Planet 9** project's WiseView service, from ESA **Gaia DR3**, and from the **SIMBAD** database (CDS, Strasbourg, with the Harvard mirror).

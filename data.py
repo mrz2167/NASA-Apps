@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Доступ к снимкам SPHEREx в архиве IRSA (Питонист 1).
 
     find_images(ra, dec, size_deg)  -> astropy Table: url, obs_id, release, time, detector, wl_min_um, wl_max_um

@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Source finding on awkward images (no network)."""
 from __future__ import annotations
 

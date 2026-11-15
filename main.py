@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """LUMEN Skywatch — бэкенд по контракту API.md.
 
     uvicorn main:app --reload            # http://localhost:8000

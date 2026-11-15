@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Кадры WISE/NEOWISE 2010–2024 для любой точки неба — для «Trail» на 14 лет.
 
     get_wise(ra, dec, fov) -> {"frames": [{date, mjd, image (uint8 2D, строки сверху вниз)}],

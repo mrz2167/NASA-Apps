@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Built skies on disk, so a restart (every deploy) doesn't rebuild the demo fields from hundreds of FITS files.
 
 A "sky" (main._load_sky / sky.get_sky) holds the reprojected frames plus the raw cutouts the spectrum and

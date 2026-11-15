@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Координаты, движение, переменность и карточка «Кто это?» (Питонист 3).
 
     now_coord(name, when)                         -> SkyCoord на дату

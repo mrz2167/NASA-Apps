@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Резервные копии с сервера: отчёты пользователей и кэш SPHEREx/WISE с постоянного диска Railway.
 
     GET /api/admin/backup?key=KEY              что есть: размеры, число файлов, число отчётов

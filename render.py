@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Картинки и анимации для сайта — всё в памяти, без файлов.
 
     from render import blink_gif, frame_png, diff_png

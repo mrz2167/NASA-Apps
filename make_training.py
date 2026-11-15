@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Реальные кадры для учебных уровней 1–5 -> web/levels/ (PNG + training.json).
 
     python make_training.py [--api http://localhost:8077]

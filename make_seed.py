@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Поиск IRSA для всех полей сайта -> seed/queries/ (в git): сервер собирает их и без IRSA.
 
     python make_seed.py            # все поля: кейсы и «Try» (main.WARM_FIELDS) + «Surprise me» (web/index.html)

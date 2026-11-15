@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Teacher view of the reports: class codes, the per-class summary and its CSV filter (no network, temp database)."""
 from __future__ import annotations
 

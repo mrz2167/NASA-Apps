@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Pre-show check: is the live site ready for the demo? Prints READY in green or a list of what's wrong.
 
     python scripts/preflight.py                      # production

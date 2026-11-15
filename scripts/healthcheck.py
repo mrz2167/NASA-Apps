@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Проверка живого сайта с сообщением в Telegram: раз в 5 минут из cron/launchd на любом включённом компьютере.
 
     TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 scripts/healthcheck.py

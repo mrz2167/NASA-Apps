@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Пять тестовых объектов NASA с позициями и собственным движением.
 
     coord_at(name, when="2025-11-15") -> SkyCoord на нужную дату

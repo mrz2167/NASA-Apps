@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Одна функция для сайта: координаты -> всё, что нужно показать.
 
     from sky import get_sky, get_target

@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Кадры для мигания (Питонист 1).
 
     build_frames(cutouts, coord, size_deg) -> [(дата эпохи, детектор, 2D-кадр)]

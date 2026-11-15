@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Знаменитые объекты, которые посетители набирают первыми: сервер заранее собирает их поля (main._warm),
 а сайт показывает их кнопками. Координаты — ICRS, градусы (J2000; у Проксимы и α Cen сдвинуты
 собственным движением к 2025.9, чтобы звезда была в середине поля).

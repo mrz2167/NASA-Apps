@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Свой список «какой снимок SPHEREx накрывает какую точку неба» — запасной путь, когда IRSA молчит.
 
 IRSA (TAP) — единственное место, где можно спросить «какие экспозиции накрывают RA/Dec». Сами снимки

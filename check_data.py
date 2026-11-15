@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Проверка конвейера данных: поиск -> вырезки (в кэш) -> кадры -> картинки и GIF.
 
     python check_data.py                       # WISE 0855

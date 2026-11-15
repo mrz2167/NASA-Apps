@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Скачать резервную копию с живого сайта: отчёты (reports.db) и кэш (cache.tar).
 
     BACKUP_KEY=... python3 scripts/backup.py              # отчёты + кэш в backups/ГГГГ-ММ-ДД/

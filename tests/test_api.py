@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Быстрые проверки перед деплоем (без сети и без кэша SPHEREx): запускаются в GitHub Actions на каждый push.
 
     pip install -r requirements.txt pytest && pytest -q tests

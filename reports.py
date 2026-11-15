@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Находки пользователей: кнопка «Send report» в окне Field report -> запись на нашем сервере.
 
     POST   /api/reports              принять отчёт (свободный режим, реальные данные SPHEREx)

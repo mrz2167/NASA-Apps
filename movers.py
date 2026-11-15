@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Кандидаты в движущиеся объекты (астероиды, кометы) по сеансовым кадрам SPHEREx.
 
     found = find_movers(imgs, mjds)      # imgs — кадры ОДНОГО детектора на общей сетке, по времени

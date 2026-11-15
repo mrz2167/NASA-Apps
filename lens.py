@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Карты молекул для линз сайта: где на картинке видно поглощение воды, метана, CO₂, CO.
 
     maps = molecule_maps(sky)      # {"water": 2D, "methane": 2D, "co2": 2D, "co": 2D}

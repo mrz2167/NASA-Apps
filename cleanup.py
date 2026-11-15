@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Automatic, conservative cleanup of old visitor fields on the cache disk.
 
 Every new sky position a visitor opens adds 100-700 cutout files (plus a query, a Gaia table, maybe WISE

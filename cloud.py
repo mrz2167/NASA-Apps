@@ -1,3 +1,4 @@
+# AI disclosure: parts of this file were written with AI assistance (Claude, Anthropic), then reviewed and tested by the LUMEN team. See README, "AI use".
 """Вырезки SPHEREx прямо из открытого бакета AWS — без сервиса вырезок IRSA.
 
     cutout_hdul(irsa_url) -> fits.HDUList   (PRIMARY, IMAGE, FLAGS, VARIANCE, ZODI, WCS-WAVE)
