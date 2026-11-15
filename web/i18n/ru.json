@@ -417,5 +417,21 @@
 "★ Collect your star": "★ Получить звезду",
 "✓ Case # of # complete · +# XP": "✓ Дело # из # пройдено · +# XP",
 "✓ Training # of # complete · +# XP": "✓ Тренировка # из # пройдена · +# XP",
-"🎲 Surprise me": "🎲 Удиви меня"
+"🎲 Surprise me": "🎲 Удиви меня",
+"Right ascension or name": "Прямое восхождение или название",
+"133.7951 · 08h55m10.8s · or a name: Vega": "133.7951 · 08h55m10.8s · или название: Вега",
+"Famous": "Знаменитые",
+"Orion Nebula": "Туманность Ориона",
+"Andromeda Galaxy": "Галактика Андромеды",
+"Centre of the Milky Way": "Центр Млечного Пути",
+"Crab Nebula": "Крабовидная туманность",
+"Pleiades": "Плеяды",
+"Vega": "Вега",
+"Sirius": "Сириус",
+"Betelgeuse": "Бетельгейзе",
+"Names need the server": "Для поиска по названию нужен сервер",
+"Type the coordinates instead.": "Введи координаты.",
+"Asking our list and the SIMBAD catalogue…": "Ищу в нашем списке и в каталоге SIMBAD…",
+"Found it. Loading this patch of sky…": "Нашёл. Загружаю этот участок неба…",
+"Not found": "Не найдено"
 }

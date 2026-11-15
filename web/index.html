@@ -349,12 +349,12 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
       <div class="banner" id="newHere"><span>New here? Start the game to learn the tools in 10 minutes.</span><button class="btn btn-amber" id="bannerStart">Start the game</button></div>
       <form class="search" id="searchForm" autocomplete="off">
         <label class="field">
-          <span class="label">Right ascension</span>
-          <input id="raIn" placeholder="133.7951  or  08h55m10.8s" required>
+          <span class="label">Right ascension or name</span>
+          <input id="raIn" placeholder="133.7951 · 08h55m10.8s · or a name: Vega" required>
         </label>
         <label class="field">
           <span class="label">Declination</span>
-          <input id="decIn" placeholder="-7.2451  or  -07d14m42.5s" required>
+          <input id="decIn" placeholder="-7.2451  or  -07d14m42.5s">
         </label>
         <label class="field" style="flex:0 1 150px">
           <span class="label">Field of view</span>
@@ -1217,7 +1217,9 @@ function startFree(scanArgs){
   freeTitle();
   $("dyk").hidden=true;
   setTools(ALL_TOOLS);
-  $("quick").innerHTML=`<span class="label">Try</span><button class="chip chip-surprise" id="surpriseChip">🎲 Surprise me</button>`+PATCHES.map((p,i)=>`<button class="chip" data-p="${i}">${p.name}</button>`).join("");
+  $("quick").innerHTML=`<span class="label">Try</span><button class="chip chip-surprise" id="surpriseChip">🎲 Surprise me</button>`+PATCHES.map((p,i)=>`<button class="chip" data-p="${i}">${p.name}</button>`).join("")
+    +(CONFIG.API_BASE?`<span class="label" style="margin-left:6px">Famous</span>`+FAMOUS_CHIPS.map(n=>`<button class="chip" data-fam="${n}">${n}</button>`).join(""):"");
+  $("quick").querySelectorAll("[data-fam]").forEach(b=>b.onclick=()=>goToName(b.dataset.fam));
   $("surpriseChip").onclick=surprise;
   $("quick").querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{ const p=PATCHES[+b.dataset.p]; $("raIn").value=p.ra; $("decIn").value=p.dec; freeTitle(); scan(p.ra,p.dec,+$("fovIn").value,p.key); });
   if(scanArgs) scan(...scanArgs);
@@ -2039,8 +2041,24 @@ $("dlCert").onclick=async()=>{ const url=await drawCertificate(P.name); const a=
 $("copySite").onclick=async()=>{ try{ await navigator.clipboard.writeText(SITE_URL); toast("Link copied","Send it to a friend so they can earn their star too."); }catch(e){ toast("Copy this link", SITE_URL); } };
 
 /* ---------- wiring & boot ---------- */
+// A name instead of coordinates ("Vega", "M42", "Orion Nebula"): ask the server where it is.
+const FAMOUS_CHIPS = ["Orion Nebula","Andromeda Galaxy","Centre of the Milky Way","Crab Nebula","Pleiades","Vega","Sirius","Betelgeuse"];
+const looksLikeName = v => /[a-z]/i.test(v) && !/^\s*[\d.]+\s*h\s*[\d.]*\s*m?\s*[\d.]*\s*s?\s*$/i.test(v) && !/^\s*[\d.\s:]+$/.test(v);
+async function goToName(name){
+  if(!CONFIG.API_BASE) return toast("Names need the server", "Type the coordinates instead.");
+  toast("Looking up "+name, "Asking our list and the SIMBAD catalogue…");
+  try{
+    const r=await api.get("/api/resolve",{name},20000);
+    $("raIn").value=r.ra; $("decIn").value=r.dec;
+    const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-r.ra)<.01&&Math.abs(TARGETS[k].dec-r.dec)<.01)||null;
+    if(S.ctx!=="free") startFree();
+    freeTitle(); toast(r.name, "Found it. Loading this patch of sky…");
+    scan(r.ra, r.dec, +$("fovIn").value||0.1, key);
+  }catch(err){ toast("Not found", err.message||"Check the spelling or type the coordinates."); }
+}
 $("searchForm").onsubmit=e=>{
   e.preventDefault();
+  if(looksLikeName($("raIn").value) && !$("decIn").value.trim()) return goToName($("raIn").value.trim());
   const c=checkCoords(parseRA($("raIn").value), parseDec($("decIn").value), $("fovIn").value); if(!c) return;
   const [ra, dec, fov]=c;
   const key=Object.keys(TARGETS).find(k=>Math.abs(TARGETS[k].ra-ra)<.01&&Math.abs(TARGETS[k].dec-dec)<.01)||null;

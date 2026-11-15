@@ -417,5 +417,21 @@
 "★ Collect your star": "★ Yulduzingni ol",
 "✓ Case # of # complete · +# XP": "✓ Ish # / # bajarildi · +# XP",
 "✓ Training # of # complete · +# XP": "✓ Mashq # / # bajarildi · +# XP",
-"🎲 Surprise me": "🎲 Meni hayron qoldir"
+"🎲 Surprise me": "🎲 Meni hayron qoldir",
+"Right ascension or name": "To‘g‘ri chiqish yoki nom",
+"133.7951 · 08h55m10.8s · or a name: Vega": "133.7951 · 08h55m10.8s · yoki nom: Vega",
+"Famous": "Mashhur",
+"Orion Nebula": "Orion tumanligi",
+"Andromeda Galaxy": "Andromeda galaktikasi",
+"Centre of the Milky Way": "Somon yo‘li markazi",
+"Crab Nebula": "Qisqichbaqa tumanligi",
+"Pleiades": "Hulkar",
+"Vega": "Vega",
+"Sirius": "Sirius",
+"Betelgeuse": "Betelgeyze",
+"Names need the server": "Nom bo‘yicha qidirish uchun server kerak",
+"Type the coordinates instead.": "Koordinatalarni kirit.",
+"Asking our list and the SIMBAD catalogue…": "Ro‘yxatimizda va SIMBAD katalogida qidiryapman…",
+"Found it. Loading this patch of sky…": "Topdim. Osmonning shu qismini yuklayapman…",
+"Not found": "Topilmadi"
 }

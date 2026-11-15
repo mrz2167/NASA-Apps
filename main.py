@@ -1308,6 +1308,68 @@ def nearest(ra: RA, dec: DEC, n: Annotated[int, Query(ge=1, le=10, description="
     return {"fields": out[:n]}
 
 
+# ---------- name search: "Vega", "M42", "Orion Nebula" -> coordinates ----------
+def _norm_name(s: str) -> str:
+    import re
+    s = s.lower().replace("messier", "m").replace("−", "-")
+    return re.sub(r"[^a-z0-9+\-]", "", s)
+
+
+@app.get("/api/resolve")
+def resolve(name: Annotated[str, Query(min_length=1, max_length=80, description="Object name, e.g. Vega, M42, Orion Nebula.")]):
+    """Object name -> position. Our own lists first (famous objects, demo fields, "Surprise me"), then SIMBAD.
+
+    Returns `name`, `ra`, `dec` (degrees, ICRS) and `source` ("lumen" or "simbad"); 404 if nobody knows it.
+    """
+    import re
+    q = _norm_name(name)
+    if not q:
+        raise HTTPException(422, "Type an object name, e.g. Vega or M42.")
+    lists = list(FAMOUS_FIELDS) + list(WARM_FIELDS) + _surprise_fields()
+    for nm, ra, dec in lists:                                     # exact name or a name in brackets: "(M42)"
+        parts = [nm] + re.findall(r"\(([^)]+)\)", nm) + [re.sub(r"\s*\(.*\)", "", nm)]
+        if any(_norm_name(p) == q for p in parts):
+            return {"name": nm, "ra": ra, "dec": dec, "source": "lumen"}
+    if len(q) >= 4:
+        for nm, ra, dec in lists:
+            if q in _norm_name(nm):
+                return {"name": nm, "ra": ra, "dec": dec, "source": "lumen"}
+    try:                                                          # SIMBAD (Harvard mirror, as identify.py)
+        import requests
+        r = requests.get("https://simbad.harvard.edu/simbad/sim-id",
+                         params={"Ident": name.strip(), "output.format": "ASCII"}, timeout=10)
+        m = re.search(r"Coordinates\(ICRS[^)]*\):\s*(\d+ \d+ [\d.]+)\s+([+-]\d+ \d+ [\d.]+)", r.text)
+        if m:
+            from astropy.coordinates import SkyCoord
+            import astropy.units as u
+            c = SkyCoord(m.group(1), m.group(2), unit=(u.hourangle, u.deg))
+            title = re.search(r"Object\s+(.+?)\s+---", r.text)
+            return {"name": title.group(1).strip() if title else name.strip(),
+                    "ra": round(c.ra.deg, 5), "dec": round(c.dec.deg, 5), "source": "simbad"}
+    except Exception:
+        raise HTTPException(503, "The SIMBAD catalogue is not answering. Type the coordinates instead.")
+    raise HTTPException(404, f"No object called \"{name.strip()}\" was found. Check the spelling or type the coordinates.")
+
+
+# ---------- IRSA watchdog: know that NASA's archive is down before a visitor has to wait for it ----------
+def _irsa_watch() -> None:
+    import time
+    import requests
+    import data
+    while True:
+        try:
+            requests.get("https://irsa.ipac.caltech.edu/TAP/sync", params={"QUERY": "SELECT 1", "FORMAT": "csv"}, timeout=8)
+        except Exception:                                         # no connection: skip IRSA for the next 10 min
+            data._tap_down_until = max(data._tap_down_until, time.time() + data.TAP_RETRY_AFTER_S)
+        time.sleep(120)
+
+
+@app.on_event("startup")
+def _start_irsa_watch() -> None:
+    if os.environ.get("SKYWATCH_IRSA_WATCH", "1") != "0":
+        threading.Thread(target=_irsa_watch, name="irsa-watch", daemon=True).start()
+
+
 @app.on_event("startup")
 def _start_warm() -> None:
     if os.environ.get("SKYWATCH_WARM", "1") != "0":

@@ -188,9 +188,11 @@ def _centroid(img: np.ndarray, x0: float, y0: float, search: int = 2, r: int = 2
     big = _fill_nan_cores(img[iy - b:iy + b + 1, ix - b:ix + b + 1])
     big = big - np.nanmedian(img)
     inner = big[b - search:b + search + 1, b - search:b + search + 1]
+    if not np.isfinite(inner).any():          # a very bright star (Vega, Sirius) can blank the whole core
+        return None
     py, px = np.unravel_index(np.nanargmax(inner), inner.shape)
     py, px = py + b - search, px + b - search
-    win = big[py - r:py + r + 1, px - r:px + r + 1].copy()
+    win = np.nan_to_num(big[py - r:py + r + 1, px - r:px + r + 1].copy(), nan=0.0)
     win[win < 0] = 0
     if win.sum() <= 0:
         return None
