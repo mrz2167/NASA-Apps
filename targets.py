@@ -28,7 +28,7 @@ TARGETS = {
         pmra=3981.97666296105, pmdec=-2466.8318147663504, parallax=270.6580324694526, epoch=2016.0,
     ),
     "wise0855": dict(
-        title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", catalog_en="SIMBAD · WISE J085510.83−071442.5 · Y4 brown dwarf", kind="coldest known brown dwarf",
+        title="WISE 0855−0714", simbad="WISE J085510.83-071442.5", catalog_en="SIMBAD · WISE J085510.83−071442.5 · Y dwarf (Y4, Kirkpatrick 2021)", kind="coldest known brown dwarf",
         gaia_dr3=None, ra=133.81890825, dec=-7.247048,
         pmra=-8123.7, pmdec=673.2, parallax=439.0, epoch=2000.0,
         when="2026-01-01",  # под эту дату скачан кэш (центр вырезки)
