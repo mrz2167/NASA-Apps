@@ -97,7 +97,7 @@ Field by field:
 | `motion.catalog_arcsec_per_yr` | Catalogue value for comparison, or `null` | identify.py |
 | `variability.ratio` | max / min flux across epochs (1.0 = steady) | identify.py |
 | `molecules` | Absorption index 0–1 per molecule (0 also when not measured; see `molecules_snr`) | spectrum.py |
-| `molecules_snr` | Index divided by its error, per molecule; `null` = no spectrum points in the band or its continuum. The site shows "SIGN" only for index ≥ 0.2 (methane 0.15) **and** ≥ 3σ; above the threshold but below 3σ is "UNSURE" | spectrum.py |
+| `molecules_snr` | Index divided by its error, per molecule; `null` = no spectrum points in the band or its continuum. The site shows "SIGN" only for index ≥ 0.2 **and** ≥ 3σ; above the threshold but below 3σ is "UNSURE" | spectrum.py |
 | `spectrum` | One point per SPHEREx exposure, wavelength in µm, any flux unit | spectrum.py |
 
 The frontend writes the verdict itself from these numbers (moving + methane → "Looks like a cold brown dwarf", varies but still → "Variable star", etc.).

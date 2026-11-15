@@ -131,7 +131,7 @@ h2{font-size:18px;margin-top:22px}
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const SIGN=0.2, signOf=k=>k==="methane"?0.15:SIGN, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
+const SIGN=0.2, signOf=k=>SIGN, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
 let data=null, summ=null, timer=null, view="class";
 
 function params(){ const p=new URLSearchParams(); p.set("key",$("key").value.trim()); const c=$("cls").value.trim(); if(c) p.set("class_code",c); return p; }

@@ -594,17 +594,18 @@ const MOLS = {
   co:      {label:"CO",       sym:"CO",  color:"#E0352B", bands:[[4.55,4.8]]}
 };
 const SIGN = 0.2; // molecule index above this = "sign"
-// methane: 0.15, the same threshold the server uses for "signs of methane" (identify.py)
-const signOf = k => k==="methane" ? 0.15 : SIGN;
+const signOf = k => SIGN;   // one threshold for every molecule (methane continuum is no longer biased low)
 // band + continuum windows the server measures (spectrum.BANDS); no spectrum points there = not measured, not "none"
-const MOL_WIN = {water:[[2.8,3.1],[2.2,2.4],[3.6,3.8]], methane:[[3.2,3.4],[2.9,3.0],[3.9,4.0]], co2:[[4.2,4.35],[4.0,4.1],[4.45,4.55]], co:[[4.55,4.8],[4.45,4.5],[4.85,4.95]]};
+const MOL_WIN = {water:[[2.8,3.1],[2.2,2.4],[3.6,3.8]], methane:[[3.2,3.4],[2.05,2.2],[3.85,4.05]], co2:[[4.2,4.35],[4.0,4.1],[4.45,4.55]], co:[[4.55,4.8],[4.45,4.5],[4.85,4.95]]};
 // "sign" only when the index passes the threshold AND is > 3σ of its own error (server: molecules_snr);
 // "unsure" = above the threshold but within noise (WISE 0855 methane, 1.4σ); "nodata" = band not covered
 function molState(mol, snr, k, o){ const v=(mol||{})[k]||0, s=snr?snr[k]:undefined;
   if((snr && s===null) || (o && !molMeasured(o,k))) return "nodata";
-  if(v<signOf(k)) return "none"; if(s!=null && s<3) return "unsure"; return "sign"; }
+  // below the threshold is "none" only if the error rules a sign out too (v + 2σ < threshold); σ = v / snr
+  if(v<signOf(k)) return (s>0 && v>0 && v+2*v/s>=signOf(k)) ? "unsure" : "none";
+  if(s!=null && s<3) return "unsure"; return "sign"; }
 const molSign=(o,k)=>molState(o?.molecules,o?.molecules_snr,k,o)==="sign";
-function molMeasured(o,k){ const wl=o?.spectrum?.wavelength; if(!wl) return !o?.spectrum; const has=([a,b])=>wl.some(l=>l>a&&l<b); const [band,...cont]=MOL_WIN[k]; return has(band)&&cont.some(has); }
+function molMeasured(o,k){ const wl=o?.spectrum?.wavelength; if(!wl) return !o?.spectrum; const has=([a,b])=>wl.some(l=>l>a&&l<b); const [band,...cont]=MOL_WIN[k]; return has(band)&&(k==="methane"?cont.every(has):cont.some(has)); }
 const EPOCHS = ["2025 · Survey 1","2025–26 · Survey 2","2026 · Survey 3","2026 · Latest"];
 
 /* motion: px per epoch (half a year); dx>0 = west (right), dy>0 = north (up)

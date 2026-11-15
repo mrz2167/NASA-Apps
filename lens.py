@@ -105,7 +105,12 @@ def molecule_maps(sky: dict) -> dict[str, np.ndarray]:
         f1, n1 = _median_in(F, W, [(l1, h1)])
         f2, n2 = _median_in(F, W, [(l2, h2)])
         x1, x2, xb = (l1 + h1) / 2, (l2 + h2) / 2, sum(b["band"]) / 2
-        fc = f1 + (f2 - f1) * (xb - x1) / (x2 - x1)
+        if b.get("powerlaw"):   # далёкие окна (метан): степенной закон, как в карточке (spectrum.BANDS)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                t = np.log(xb / x1) / np.log(x2 / x1)
+                fc = np.where((f1 > 0) & (f2 > 0), np.exp((1 - t) * np.log(f1) + t * np.log(f2)), np.nan)
+        else:
+            fc = f1 + (f2 - f1) * (xb - x1) / (x2 - x1)
         nc = np.minimum(n1, n2)
         v = fc[np.isfinite(fc)]
         if v.size < 20:

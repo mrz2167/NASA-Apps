@@ -8,7 +8,9 @@ from data import bad_pixels
 # Окна поглощения и континуума в микронах
 BANDS = {
     "water":   {"band": (2.8, 3.1),  "cont": [(2.2, 2.4), (3.6, 3.8)]},
-    "methane": {"band": (3.2, 3.4),  "cont": [(2.9, 3.0), (3.9, 4.0)]},
+    # метан: опорные окна вне полосы воды (2.7–3.1 мкм), иначе континуум занижен и индекс тоже;
+    # окна далеко друг от друга, поэтому континуум — степенной закон между ними (у обычной звезды ≈ 0)
+    "methane": {"band": (3.2, 3.4),  "cont": [(2.05, 2.2), (3.85, 4.05)], "powerlaw": True},
     "co2":     {"band": (4.2, 4.35), "cont": [(4.0, 4.1), (4.45, 4.55)]},
     "co":      {"band": (4.55, 4.8), "cont": [(4.45, 4.5), (4.85, 4.95)]},
 }
@@ -156,20 +158,48 @@ def molecule_scores(wl: np.ndarray, flux: np.ndarray) -> dict[str, float]:
     scores: dict[str, float] = {}
 
     for name, b in BANDS.items():
-        in_mask = (wl > b["band"][0]) & (wl < b["band"][1])
-        inband = np.nanmedian(flux[in_mask]) if np.any(in_mask) else np.nan
-
-        cont_parts = [flux[(wl > lo) & (wl < hi)] for lo, hi in b["cont"]]
-        cont_parts = [p for p in cont_parts if len(p) > 0]
-        cont = np.nanmedian(np.concatenate(cont_parts)) if cont_parts else np.nan
-
-        if np.isfinite(cont) and cont > 0 and np.isfinite(inband):
-            val = float(np.clip(1.0 - inband / cont, 0.0, 1.0))
-            scores[name] = round(val, 3)
-        else:
-            scores[name] = 0.0
+        r = _band_index(wl, flux, None, b)
+        scores[name] = round(float(np.clip(r[0], 0.0, 1.0)), 3) if r else 0.0
 
     return scores
+
+
+def _median_err(flux, err, m):
+    """Медиана потока в маске и её погрешность (≈ 1.25·σ/√n); без ошибок — (медиана, nan)."""
+    f = float(np.nanmedian(flux[m]))
+    if err is None:
+        return f, np.nan
+    return f, float(1.2533 * np.sqrt(np.nanmean(err[m] ** 2) / m.sum()))
+
+
+def _band_index(wl, flux, err, b) -> tuple[float, float] | None:
+    """(индекс полосы 1 − F_полосы / F_континуума, его погрешность) или None, если нет точек.
+
+    Континуум: обычно — общая медиана опорных окон; для "powerlaw" — степенной закон между медианами
+    двух окон в центре полосы (нужны оба окна)."""
+    mb = (wl > b["band"][0]) & (wl < b["band"][1])
+    masks = [(wl > lo) & (wl < hi) for lo, hi in b["cont"]]
+    if not mb.any():
+        return None
+    fb, eb = _median_err(flux, err, mb)
+    if b.get("powerlaw"):
+        if not all(m.any() for m in masks):
+            return None
+        (f1, e1), (f2, e2) = (_median_err(flux, err, m) for m in masks)
+        if not (f1 > 0 and f2 > 0):
+            return None
+        x1, x2 = (sum(w) / 2 for w in b["cont"])
+        t = np.log(sum(b["band"]) / 2 / x1) / np.log(x2 / x1)
+        fc = float(np.exp((1 - t) * np.log(f1) + t * np.log(f2)))
+        ec = fc * float(np.hypot((1 - t) * e1 / f1, t * e2 / f2))
+    else:
+        mc = np.any(masks, axis=0)
+        if not mc.any():
+            return None
+        fc, ec = _median_err(flux, err, mc)
+    if not (np.isfinite(fc) and fc > 0 and np.isfinite(fb)):
+        return None
+    return 1.0 - fb / fc, float(np.hypot(eb / fc, fb * ec / fc ** 2))
 
 
 MIN_SNR = 3.0   # индекс считается признаком, только если он больше 3σ своей погрешности
@@ -183,22 +213,8 @@ def molecule_snr(wl, flux, err) -> dict[str, float | None]:
     wl, flux, err = (np.asarray(v, float) for v in (wl, flux, err))
     out: dict[str, float | None] = {}
     for name, b in BANDS.items():
-        m = (wl > b["band"][0]) & (wl < b["band"][1])
-        cm = np.zeros_like(m)
-        for lo, hi in b["cont"]:
-            cm |= (wl > lo) & (wl < hi)
-        if not m.any() or not cm.any():
-            out[name] = None
-            continue
-        fb, fc = np.nanmedian(flux[m]), np.nanmedian(flux[cm])
-        eb = 1.2533 * np.sqrt(np.nanmean(err[m] ** 2) / m.sum())
-        ec = 1.2533 * np.sqrt(np.nanmean(err[cm] ** 2) / cm.sum())
-        if not (np.isfinite(fc) and fc > 0 and np.isfinite(fb)):
-            out[name] = None
-            continue
-        sig = float(np.hypot(eb / fc, fb * ec / fc ** 2))
-        idx = 1.0 - fb / fc
-        out[name] = round(float(idx / sig), 1) if sig > 0 and np.isfinite(sig) else None
+        r = _band_index(wl, flux, err, b) if len(wl) else None
+        out[name] = round(r[0] / r[1], 1) if r and r[1] > 0 and np.isfinite(r[1]) else None
     return out
 
 

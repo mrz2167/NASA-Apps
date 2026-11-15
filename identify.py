@@ -509,7 +509,7 @@ def who_is_it(coord: SkyCoord, motion: dict, scores: dict, variability: dict, on
     noise = 2 * err if np.isfinite(err) else 2.0
     moving = speed >= max(1.0, noise)
     has_water = (scores.get("water") or 0) > 0.15
-    has_methane = (scores.get("methane") or 0) > 0.15
+    has_methane = (scores.get("methane") or 0) > 0.2
     has_mol = has_water or has_methane
 
     if n_ep <= 1 or speed > 60.0:
