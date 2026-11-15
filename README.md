@@ -1,247 +1,112 @@
-# NASA-Apps
-NASA Space Apps 2026 — Planet X and SPHEREx challenge.
+# LUMEN Skywatch
 
-Сайт, который показывает снимки SPHEREx любого участка неба как видео и отвечает не только «что движется», но и «из чего это сделано».
+**NASA Space Apps Challenge 2026 · Planet X and SPHEREx challenge**
 
-## Установка
+**Live site: https://nasa-skywatch-production.up.railway.app/**
 
-```
-python -m venv .venv
-.venv\Scripts\activate          # Windows;  source .venv/bin/activate — macOS/Linux
-pip install -r requirements.txt
-```
+LUMEN Skywatch lets anyone open NASA's **SPHEREx** images of any part of the sky and watch them as a short movie, the way astronomers "blink" photos to find things that move. SPHEREx photographs the whole sky in 102 colours of infrared light, so the site can answer two questions: **what is moving** and **what is it made of**.
 
-## Живой сайт
+Students learn the method step by step through 10 levels. Then they explore the real sky on their own and send in what they find.
 
-**https://nasa-skywatch-production.up.railway.app/** (Railway, проект `nasa-skywatch`)
+---
 
-**Автодеплой:** сервис подключён к GitHub (`mrz2167/NASA-Apps`, ветка `main`) — каждый push в `main` сам собирается и выкатывается. Ход сборки: `railway logs --build` или дашборд Railway.
+## What you can do on the site
 
-Кэш лежит на постоянном диске Railway (volume, смонтирован в `/app/cache`), в git и в образ он не входит. Сервер дописывает туда новые места неба сам. Залить локальный кэш на диск: `railway volume files upload cache/<папка> --volume <имя>` (список: `railway volume list`).
-
-Ручной деплой текущей папки без push (для проверки): `railway up --ci`.
-
-## Находки пользователей (`reports.py`)
-
-- В свободном режиме на реальных данных окно «Field report» отправляет находку кнопкой **Send report** на наш сервер:
-  координаты, что это (каталог или кандидат), движение, молекулы, детектор; имя — если его ввели для сертификата.
-- Повторная отправка того же объекта не дублируется; не больше 60 отчётов в час с одного браузера.
-- Смотреть: страница **`/reports`** (или `/api/reports.csv`) с ключом команды `REPORTS_KEY` — таблица, фильтр
-  «только кандидаты», CSV, удаление мусора. Без `REPORTS_KEY` на сервере список закрыт (отчёты всё равно сохраняются).
-- Хранилище — SQLite, по умолчанию `cache/reports.db`: на Railway это постоянный диск (volume в `/app/cache`),
-  деплой его не стирает. Другой путь — переменная `REPORTS_DB`.
-
-## Резервные копии (`backup.py`, `scripts/backup.py`)
-
-На сервере задайте `BACKUP_KEY` (без него берётся `REPORTS_KEY`; без обоих копии выключены).
-- `GET /api/admin/backup/reports.db?key=…` — целая копия базы отчётов (SQLite backup API, безопасно во время записи).
-- `GET /api/admin/backup/cache.tar?key=…` — весь кэш SPHEREx/WISE одним tar-потоком (~1 ГБ).
-- **Отчёты каждый день автоматически:** `.github/workflows/backup.yml` в 02:30 UTC скачивает `reports.db`, проверяет
-  и хранит 90 дней (Actions → Backup reports → артефакты). Нужен секрет репозитория `BACKUP_KEY`.
-- **Кэш** слишком большой для артефактов приватного репозитория — копируйте на компьютер:
-  `BACKUP_KEY=… python3 scripts/backup.py` (в `backups/ГГГГ-ММ-ДД/`, хранит 60 дней отчётов и 3 копии кэша;
-  каждая копия проверяется, неудачная попытка не трогает уже сохранённую). Раз в день через cron:
-  `30 3 * * * cd /путь/к/NASA-Apps && BACKUP_KEY=… python3 scripts/backup.py >> backups/log.txt 2>&1`
-- Восстановление: `reports.db` → `cache/reports.db` на сервере; `tar xf cache.tar` в папке приложения
-  (на Railway — `railway volume files upload`).
-
-## Тесты перед деплоем (`tests/`, `.github/workflows/test.yml`)
-
-- `pytest -q tests` — без сети и без кэша: здоровье сервера, страницы и синтаксис их скриптов, проверка параметров API (422),
-  отчёты, ключи и целостность резервных копий, быстрый отказ при падении WiseView, математика выбора объекта.
-- Playwright-тесты положите в `tests/e2e/` (`*.spec.js|ts` или `test_*.py`): workflow поднимает сервер и запускает их,
-  адрес — переменная `BASE_URL`. Тесты на реальных данных качают их из архивов, это медленнее.
-- **Чтобы сломанный код не уходил на сайт:** в Railway → сервис → Settings → включите **Wait for CI**.
-  Тогда push в `main` выкатывается только после зелёного workflow «Tests».
-
-## Перед показом (`scripts/preflight.py`)
-
-За 10–15 минут до демо: `python scripts/preflight.py` (только чтение, без зависимостей, по умолчанию продакшен;
-другой адрес — первым аргументом, `--quick` — без линз). Проверяет `/api/health` (прогрев, диск, IRSA, WISE),
-главную, уровни обучения, перевод и время ответа кадров, карточки и линз на демо-полях. В конце зелёное
-**READY** или список того, что сломано (код выхода 0 — готово, 2 — готово с предупреждениями, 1 — чинить).
-
-## Если сайт упал (`/api/health`, `scripts/healthcheck.py`)
-
-- `/api/health` отвечает **503**, если сломана база отчётов или на диске < 0,3 ГБ; `wise.ok=false` — WiseView недоступен
-  (только предупреждение: SPHEREx работает, ученику пишем «WISE временно недоступен»).
-- Проще всего — **UptimeRobot** (бесплатно, проверка раз в 5 минут, письмо или Telegram): монитор HTTP(s) на
-  `https://nasa-skywatch-production.up.railway.app/api/health`, второй — на `/reports`.
-- Свой вариант на любом включённом компьютере: `scripts/healthcheck.py` раз в 5 минут из cron, сообщения в Telegram
-  (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) — только при смене состояния: упал / снова работает / сбой дольше часа.
-  GitHub Actions для этого не подходит: на приватном репозитории проверка каждые 5 минут съест бесплатные минуты.
-
-## Docker (рекомендуется)
-
-```
-docker compose up -d --build       # http://localhost:8077/
-docker compose logs -f             # логи
-docker compose down                # остановить
-```
-- `docker-compose.yml` подключает `./cache` томом — положите туда `cache/` из архива на Drive, чтобы демо открывалось мгновенно; новые места неба сохраняются между перезапусками. Без кэша всё скачивается из открытого бакета SPHEREx на AWS.
-- Для хостинга (Railway/Render/Fly): тот же `Dockerfile`, порт берётся из `$PORT`; `cache/` — постоянный диск, смонтированный в `/app/cache`.
-
-## Запуск сайта целиком
-
-```
-pip install -r requirements.txt
-uvicorn main:app --port 8077
-```
-Открыть **http://localhost:8077/** — сайт (`web/index.html`) и API с одного адреса, реальные данные SPHEREx.
-`?api=demo` — симулированное небо без бэкенда; `?api=https://host` — другой сервер.
-
-Проверено в браузере: все 5 кейсов открываются, клик по цели даёт верный вердикт сайта
-(Barnard — Nearby star on the move, WISE 0855 и eps Ind B — Looks like a cold brown dwarf, RW Aur и R Dra — Variable star),
-кейс 04 закрывается на реальных данных.
-
-Правки во фронтенде: координаты целей — на время данных SPHEREx (J2000 Барнарда за краем кадра);
-`API_BASE` определяется сам; вердикт и стрелка учитывают `motion.significant`, незначимое движение помечено «within noise».
-
-## Бэкенд для сайта (LUMEN Skywatch): `main.py` по контракту [API.md](API.md)
-
-```
-pip install -r requirements.txt
-uvicorn main:app --port 8077          # порт любой свободный
-```
-В `index.html`: `const CONFIG = { API_BASE: "http://localhost:8077", PIX_ARCSEC: 6.15 };`
-
-| Эндпоинт | Что отдаёт |
+| Feature | What it does |
 |---|---|
-| `GET /api/frames?ra&dec&fov&detector` | PNG по эпохам (asinh, север вверх), разности (янтарный/синий), `sources` с именами Gaia DR3, `target.positions` и `molecules` |
-| `GET /api/object?ra&dec` | имя, `status` (known/candidate/star), каталог, движение ± ошибка и каталожное, переменность, молекулы, спектр, вердикт |
-| `GET /api/health` | проверка |
+| **Blink, Trail, What changed** | Real SPHEREx frames from different months, played as a movie. *Trail* draws the measured path of the object you clicked. *What changed* subtracts the first visit, so moving and variable objects stand out. |
+| **Molecule lenses (H₂O, CO₂, CO, CH₄)** | Each pixel gets a rough spectrum from every SPHEREx exposure that covers it. The lens colours the image where that spectrum dips inside a molecule's absorption band. |
+| **Six detectors (0.75–5.0 µm)** | Look at the same field through each SPHEREx detector. Cold brown dwarfs are nearly invisible at 1 µm and bright at 4–5 µm. |
+| **Object card** | Click any dot. The card shows its Gaia DR3 / SIMBAD name or *candidate* status, motion with error bars against the catalogue value, brightness variation, spectrum, molecule signs and a plain-language verdict. |
+| **Second survey: WISE / NEOWISE 2010–2024** | The same patch of sky over 14 years, so slow nearby stars visibly move. |
+| **Any place in the sky** | Type coordinates or a name (Orion Nebula, M31, Vega). There are also *Famous* buttons and **Surprise me**, which jumps to a random ready field. |
+| **Field reports** | A find from free exploration is sent to our server with one click (position, catalogue match, motion, molecules, detector). The team reviews reports in a password-protected table. |
+| **Three languages** | English, Russian and Uzbek interface, for schools in Uzbekistan. |
 
-- Сначала берётся полный набор снимков из `cache/`, если его нет — быстрый режим из архива (~2 мин на новое место), если архив лёг — что есть в кэше.
-- Пиксели читаются прямо из открытого бакета AWS `https://nasa-irsa-spherex.s3.amazonaws.com/` (`cloud.py`): только нужные строки снимка (~1,8 МБ вместо 65 МБ), результат совпадает с вырезкой IRSA пиксель в пиксель. Сервис вырезок IRSA — запасной путь; `SKYWATCH_SOURCE=irsa` — только он. Список снимков по-прежнему из IRSA TAP. Бакет в us-east-1: держите сервер в US East, тогда новое место грузится за секунды.
-- При первом запросе кадров в фоне грузится Gaia DR3 для всего поля (~20 с, кэш `cache/gaia/`), дальше клики по звёздам сверяются мгновенно.
-- Проверено на 5 объектах NASA: `/api/frames` 10–18 с первый раз, `/api/object` ~2 с.
-- Расширения к контракту (фронтенд может игнорировать): `meta`, `motion.arcsec_per_yr_err`, `motion.significant`, `variability.label`, `verdict`, `simbad_url`.
+## Learning path: 10 levels
 
-## Для сайта (Питонист 4): одна функция `get_sky`
-
-```python
-from sky import get_sky, get_target, SkyUnavailable
-
-try:
-    sky = get_sky(ra, dec, quick=True, on_progress=lambda i, n: bar.progress(i / n))
-except SkyUnavailable as e:
-    st.error(str(e))
-
-sky = get_target("barnard")          # тестовые объекты: barnard, eps_ind_b, wise0855, rw_aur, r_dra
-```
-
-| Ключ | Что внутри |
-|---|---|
-| `frames` | `[(дата, детектор, 2D)]` — кадры для мигания |
-| `by_det` | `{детектор: [(дата, кадр)]}` |
-| `info` | подписи кадров: `date, detector, n_exposures, wavelength_um` |
-| `diffs` | «что изменилось»: `[(дата, детектор, 2D)]` |
-| `wcs`, `shape`, `coord` | общая сетка кадров и центр |
-| `cutouts` | исходные вырезки — для спектра (Питонист 2) |
-| `source` | `"archive"` или `"cache"` |
-| `warnings` | строки для показа пользователю |
-
-- `quick=True` (по умолчанию): ≤ 3 снимка на (эпоху, детектор), ~50 вырезок. Повторный запрос того же места — мгновенно из кэша (центр может отличаться до 3″).
-- `offline=True`: только кэш, без сети — запасной вариант на демо.
-- Архив не отвечает и кэша нет → `SkyUnavailable` с понятным текстом.
-
-### Полный разбор объекта: `analyze(sky)`
-
-```python
-from sky import get_target, analyze
-a = analyze(get_target("wise0855"))          # online=True — ещё SIMBAD (зеркало) и Gaia
-a["card"]      # name, verdict, speed_text, direction_deg, variability, molecule_badges, simbad_url
-a["motion"]    # speed_arcsec_yr ± speed_err_arcsec_yr, direction_deg, detectors, positions (для следа)
-a["variability"], a["spectrum"] {"wavelength","flux","error"}, a["scores"]
-```
-
-Проверка на 5 объектах NASA (все вердикты верные):
-
-| Объект | Измерили | Каталог | Вердикт |
+| # | Level | Skill | Real object |
 |---|---|---|---|
-| Барнард | 10,3 ± 3,7″/год, 352° | 10,4″/год, 356° | близкая звезда с большим движением |
-| eps Ind B | 4,4 ± 0,6″/год, 125°; метан 0,82 | 4,7″/год, 122° | коричневый карлик |
-| WISE 0855 | 7,6″/год, 286° | 8,2″/год, 275° | коричневый карлик |
-| RW Aur | не движется; размах 78% | переменная | переменная звезда |
-| R Dra | не движется; размах 53% | переменная | переменная звезда |
+| 1 | The Power of the Blink | blink comparison | WISE 0855−0714 |
+| 2 | False Alarm | real mover vs. glitch | training field |
+| 3 | Through the Years | motion over years | Luhman 16 |
+| 4 | Ingredients of Space | reading ices from a spectrum | CRBR 2422.8-3423 (CO₂ ice) |
+| 5 | Did I Find You First? | catalogue check and report (final exam on real WISE frames) | Gliese 570 D |
+| 6 | The Runaway Star | measuring proper motion | Barnard's Star |
+| 7 | The Coldest Ghost | detectors and the water band | WISE 0855−0714 |
+| 8 | Twins Too Close To Split | chemistry when you can't resolve a pair | Epsilon Indi Ba/Bb |
+| 9 | The Breathing Star | variability without motion | RW Aurigae |
+| 10 | The Slow Pulse | long-period variability | R Draconis |
 
-Как это сделано (`identify.py`):
-- **Детектор** выбирается там, где объект заметнее всего относительно остальных источников кадра (холодный карлик — на 4–5 мкм). Если два детектора дают противоречащее движение, остаётся более надёжный.
-- **Центр объекта** — центр масс в окне ±2 пикселя вокруг самого яркого пикселя; у пересвеченных звёзд — центр «дыры» пересвета (она симметрична).
-- **Движение** значимо, если > 1″/год и > 2 ошибок; ошибка — по разбросу точек и расхождению детекторов.
-- **Переменность**: размах > 30% и > 5σ шума; у пересвеченных звёзд — по крыльям. Шумные кадры (мало снимков) выкидываются (`epochs.good_frames`).
-- `now_coord` берёт тестовые объекты из `targets.py`, остальные — из SIMBAD (зеркало Гарварда).
-- Ограничения: у пересвеченных звёзд (Барнард, R Dra) спектра нет; у WISE 0855 на коротких волнах в апертуру попадает соседняя звезда, поэтому метан занижен.
+Every level ends with a short history fact (Tombaugh and Pluto, helium on the Sun, Backyard Worlds' "The Accident") and the real story of the object the student just found.
 
-### Картинки и анимации: `render.py` (всё в памяти, сразу в `st.image`)
+## Data sources
 
-```python
-from render import blink_gif, frame_png, diff_png
-from targets import predicted_track
+All data are public NASA or open archive data. They are fetched when someone opens a field; the site shows no pre-made pictures.
 
-gif = blink_gif(sky, detector=3, zoom_arcsec=90)                          # мигание, bytes
-gif = blink_gif(sky, 3, zoom_arcsec=90, track=predicted_track("barnard"))  # + след по каталогу
-st.image(gif)
-png = frame_png(sky, index=0)      # один кадр;  diff_png(sky, index=0) — «что изменилось»
-```
-
-- Яркость: asinh-растяжка, одни пределы на все кадры детектора (мигание не «дышит» само).
-- Пиксели увеличены без сглаживания; север вверх, восток влево; масштабная линейка 30″.
-- Красные уголки — объект запроса; жёлтые полые кружки — след движения (не закрывают слабый объект).
-- Пересвеченные ядра ярких звёзд (Барнард, R Dra) для показа заливаются белым (`fill_saturated`). Для науки — исходные кадры.
-- Шумные кадры из малого числа снимков пропускаются (`drop_sparse=True`).
-- `track` — список SkyCoord на кадр или функция `date -> SkyCoord`; Питонист 3 может передать измеренные положения.
-- Готовые GIF для презентации: `out/anim/`.
-- Для R Dra разность бесполезна (огромное пересвеченное ядро) — переменность ярких звёзд показывать графиком яркости по крыльям.
-
-## Данные (Питонист 1) — готово
-
-| Файл | Функция | Что делает |
+| Data | Used for | Source |
 |---|---|---|
-| `data.py` | `find_images(ra, dec, size_deg=0.1)` | таблица снимков: `url, obs_id, release, time (MJD), detector, wl_min_um, wl_max_um`; дубли DR1/QR3 убраны |
-| `data.py` | `load_cutout(url, time=None)` | словарь: `image, flags, variance, zodi, wcs, spectral_wcs, time, detector, header` |
-| `data.py` | `load_cutouts(table)` | все вырезки таблицы, параллельно, через кэш |
-| `data.py` | `bad_pixels(cutout)` | маска плохих пикселей по флагам |
-| `epochs.py` | `build_frames(cutouts, coord, size_deg)` | `[(дата эпохи, детектор, 2D-кадр)]` на общей сетке |
-| `epochs.py` | `make_target_wcs(coord, size_deg)` | та же сетка, что у кадров — для `centroid_sky` и т.п. |
-| `epochs.py` | `frames_by_detector(frames)` | `{детектор: [(дата, кадр)]}` — для мигания |
-| `epochs.py` | `build_frames(..., info=[])` | заполнит `info` подписями кадров: число экспозиций, длина волны в точке, даты |
-| `epochs.py` | `diff_frames(frames)` | режим «что изменилось»: кадр минус первая эпоха (с подгонкой яркости) |
-| `epochs.py` | `select_exposures(table, per_group=3)` | быстрый режим: ≤ N снимков на (эпоху, детектор) — для живого сайта |
-| `targets.py` | `coord_at(name, when)` | координаты 5 тестовых объектов на дату (из SIMBAD/Gaia DR3, записаны в файл — работает без сети) |
-| `targets.py` | `simbad_coord(name, when)` | любой объект по имени из SIMBAD на дату; `simbad()` — клиент на зеркале **simbad.harvard.edu** (основной CDS бывает недоступен) |
+| SPHEREx Level 2 spectral images (DR1 and quick releases, 2025–26) | blink frames, detectors, per-pixel spectra, molecule lenses | NASA/IPAC IRSA, read directly from NASA's open AWS bucket [`s3://nasa-irsa-spherex`](https://nasa-irsa-spherex.s3.amazonaws.com/) |
+| SPHEREx exposure search | which exposures cover a sky position | [IRSA TAP](https://irsa.ipac.caltech.edu/) (`spherex.plane`, `spherex.artifact`), with our own coverage index as a fallback |
+| WISE / NEOWISE unTimely frames, 2010–2024 | long-baseline motion | unTimely coadds via [WiseView](http://byw.tools/wiseview) (Backyard Worlds) |
+| Gaia DR3 | star names, catalogue proper motions | IRSA |
+| SIMBAD | object names and types | Harvard mirror (`simbad.harvard.edu`) |
 
-Пример:
+## How it works
 
-```python
-from astropy.coordinates import SkyCoord
-from data import find_images, load_cutouts
-from epochs import build_frames, make_target_wcs
+1. **Find exposures.** The server asks IRSA which SPHEREx exposures cover the requested point. If IRSA is down, it uses our own coverage index instead. We built that index from the headers of about 820,000 exposures in the AWS bucket; it returns 97% of what IRSA returns.
+2. **Read only the pixels needed.** SPHEREx files are 2040×2040 images of about 67 MB each. The server uses HTTP range requests to read only the rows around the target (about 1.8 MB) and rebuilds the image, flags, variance, zodiacal light and WCS. The result is pixel-identical to IRSA's own cutout service.
+3. **Build epochs.** Exposures are grouped into visits. The server masks bad pixels (overflow, hot, cold, non-linear, transient), subtracts zodiacal light and background, and median-combines each detector per visit onto a common north-up grid (6.15″ pixels).
+4. **Measure.**
+   - *Motion:* the centroid of the object is fitted in every epoch, and a straight line through those positions gives speed and direction with an error estimate. Catalogue motions are propagated from the Gaia epoch (2016.0) to SPHEREx's epoch (2025.9) so they can be compared directly.
+   - *Variability:* the brightness range is compared with the noise level. For saturated stars it is measured in the star's wings.
+   - *Molecules:* band depth against a local continuum in each pixel for water, methane, CO₂ and CO. A sign is shown only above 3σ.
+   - *Movers:* single-visit frames minus the median of the other visits reveal transients. Detections in successive visits that line up are joined into tracks (slow asteroids and comets).
+5. **Explain.** All of this becomes an object card with a plain-language verdict ("Nearby star on the move", "Looks like a cold brown dwarf", "Variable star", "Candidate") that also states the uncertainty.
 
-coord = SkyCoord(133.75989, -7.24221, unit="deg")      # WISE 0855 на 2026 год
-table = find_images(coord.ra.deg, coord.dec.deg, 0.1)
-cutouts = load_cutouts(table)                           # первый раз долго, потом из cache/
-frames = build_frames(cutouts, coord, 0.1)
-wcs, shape = make_target_wcs(coord, 0.1)
-```
+## Validation on NASA's test objects
 
-**Готовый кэш** (чтобы не качать заново): [Google Drive](https://drive.google.com/drive/folders/1ODZE-CC1bClYx-5pgoSHZX4qoegocZFu?usp=sharing) → скачать `cache_*.zip` и распаковать в корень репозитория, чтобы получилась папка `cache/`.
+| Object | We measured | Catalogue | Verdict |
+|---|---|---|---|
+| Barnard's Star | 10.3 ± 3.7″/yr, 352° | 10.4″/yr, 356° | nearby star on the move |
+| Epsilon Indi B | 4.4 ± 0.6″/yr, 125°; methane sign | 4.7″/yr, 122° | cold brown dwarf |
+| WISE 0855−0714 | 7.6″/yr, 286° | 8.2″/yr, 275° | cold brown dwarf |
+| RW Aurigae | not moving; 78% brightness range | known variable | variable star |
+| R Draconis | not moving; 53% brightness range | known variable (Mira type) | variable star |
 
-Проверка целиком: `python check_data.py --target barnard` (объекты: `barnard, eps_ind_b, wise0855, rw_aur, r_dra`; `--per-group 3` — быстрый режим) → `out/wise0855/frames.png`, `blink_D*.gif`, `frames.npz`.
+All five verdicts match the known nature of the objects.
 
-### Что важно знать остальным
+## Honest limitations
 
-- **Релиз:** запрос идёт по таблицам `spherex.plane` / `spherex.artifact`; сейчас по WISE 0855 приходит только DR1 (258 экспозиций). Если придут дубли из QR3, остаётся DR1.
-- **Эпохи:** эпоха = разрыв > 30 дней, но не длиннее 45 дней. У WISE 0855 три эпохи (DR1); у Barnard, eps Ind B и RW Aur уже есть и QR3 за август–октябрь 2026. R Dra лежит в глубоком поле у полюса эклиптики: 2493 снимка подряд, поэтому там помесячные кадры и быстрый режим.
-- **Разности:** звёзды оставляют красно-синие следы — пиксель крупный (6″), сдвиг меньше пикселя уже заметен. Для переменных звёзд это не мешает, для слабых движущихся объектов смотрите мигание, а не разность.
-- **Вырезка 0,1°** = 58×59 пикселей по 6,16″. В кэше хранится облегчённая копия без таблицы EPSF (~55 КБ вместо 4 МБ).
-- **Архив медленный:** поиск ~6–40 с, одна вырезка ~20–30 с (8 потоков параллельно). Первый прогон объекта — 10–15 минут. Поэтому всё в `cache/`; передавайте папку `cache/` друг другу, чтобы не качать заново.
-- **Фон:** в `image` зодиакальный свет НЕ вычтен. `build_frames` вычитает `zodi` и остаточную медиану сам. Для фотометрии (Питонист 2) — вычитайте фон кольцом, как в плане.
-- **Флаги:** `bad_pixels()` отбрасывает OVERFLOW, HOT, COLD, NONFUNC, MISSING_DATA, NONLINEAR, TRANSIENT, SUR_ERROR. Флаг OUTLIER специально не используется: движущийся объект может попасть в «выбросы».
-- **Кадр одного детектора** — медиана всех экспозиций детектора за эпоху. Внутри детектора длина волны в точке объекта немного разная от экспозиции к экспозиции — для мигания это нормально; для спектра используйте отдельные вырезки и `spectral_wcs`, а не кадры.
+- **Signs, not proof.** A dip inside a molecule band is evidence, not a detection. Edges of bright stars and fast movers can create false spots, and the site says so on screen.
+- **Pixel size.** SPHEREx pixels are 6.15″, so close pairs (Epsilon Indi Ba/Bb) appear as one dot. Very bright stars saturate, and their spectra are not measured.
+- **Fast asteroids.** A main-belt asteroid crosses a 0.1° field in well under a day, so it appears as a single transient rather than a track. Only slow, distant objects give tracks.
+- **"New to you" is not "new to science."** An unnamed faint dot that does not move is reported as a *candidate*, not a discovery.
 
-### Для Питонистов 2 и 3: подводные камни на тестовых объектах
+## Reliability
 
-- **Переменность нельзя мерить по кадрам «как есть».** Внутри одного детектора длина волны в точке объекта от эпохи к эпохе разная (см. `wavelength_um` в `frames_info.json`): у R Dra в D1 — от 0,77 до 0,99 мкм. У красной звезды это само по себе меняет яркость. Честно: для каждой эпохи строить спектр (вырезки + `spectral_wcs`) и сравнивать поток на одной и той же длине волны.
-- **R Dra пересвечен.** Звезда очень яркая в ИК: центр помечен флагами переполнения/нелинейности (`bad_pixels()` их выбрасывает — отсюда тёмные кольца на кадрах). Апертурная фотометрия по центру даст мусор; мерить по крыльям или по большой апертуре с маской плохих пикселей, и честно писать «яркость оценена по крыльям».
-- **R Dra — глубокое поле:** 2493 экспозиции, скачано в быстром режиме (`--per-group 3`, 102 вырезки). Для спектра можно докачать больше.
+- **Three paths to the data:** IRSA → our AWS coverage index → the server's disk cache. When IRSA was down for over a day during the hackathon, the site kept working through the index.
+- The demo and famous fields are prepared in advance, so the first click is fast.
+- Automated tests run on every change (API validation, reports, click-selection maths, behaviour when an outside service is down). A health endpoint reports archive state, disk space and the WISE service.
+
+## Built with
+
+Python (FastAPI, Astropy, Astroquery, NumPy, SciPy, Reproject, Photutils) on the server. A single-page HTML/JavaScript canvas app in the browser. SQLite for field reports.
+
+## Repository map
+
+| Path | What it is |
+|---|---|
+| `web/index.html` | the whole site: viewer, levels, cases, lenses, object card, reports |
+| `main.py` | web server and API (`/api/frames`, `/api/object`, `/api/track`, `/api/lens`, `/api/movers`) |
+| `data.py`, `cloud.py`, `s3index.py` | finding SPHEREx exposures and reading them from AWS |
+| `epochs.py` | bad-pixel masks, background, epochs, common grid |
+| `identify.py`, `spectrum.py`, `lens.py`, `movers.py` | motion, catalogue match, spectra, molecule maps, moving-object search |
+| `wise.py` | WISE / NEOWISE frames |
+| `reports.py` | field reports |
+| `API.md` | API reference |
+| `tests/` | automated tests |
+
+## Acknowledgements
+
+This project uses data from **SPHEREx**, a NASA mission, served by **NASA/IPAC IRSA** and the NASA Open Data on AWS programme. It also uses data from **WISE/NEOWISE**, the unTimely catalogue and the **Backyard Worlds: Planet 9** project's WiseView service, from ESA **Gaia DR3**, and from the **SIMBAD** database (CDS, Strasbourg, with the Harvard mirror).
