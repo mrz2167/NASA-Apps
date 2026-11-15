@@ -662,6 +662,22 @@ LENS_RGB = {"water": (0x3D, 0x5B, 0xD9), "methane": (0xF0, 0x7A, 0x3A),
             "co2": (0xF6, 0xB5, 0x44), "co": (0xE0, 0x35, 0x2B)}   # цвета линз сайта
 
 
+LENS_MIN_SPOT_PX = 8   # пятно звезды после сглаживания 3×3 ≈ 15 px; мельче — одиночные шумовые пиксели фона
+
+
+def _lens_denoise(depth: np.ndarray) -> np.ndarray:
+    """Убрать с карты линзы мелкие пятна (< LENS_MIN_SPOT_PX связанных пикселей): это шум фона, не объекты."""
+    from scipy.ndimage import label
+    d = np.nan_to_num(depth)
+    lab, n = label(d >= 0.08, structure=np.ones((3, 3)))
+    if not n:
+        return d
+    sizes = np.bincount(lab.ravel())
+    small = sizes < LENS_MIN_SPOT_PX
+    small[0] = False
+    return np.where(small[lab], 0.0, d)
+
+
 def _lens_png(depth: np.ndarray, rgb) -> str:
     """Карта глубины -> PNG цвета молекулы с прозрачностью: от 0.08 (едва) до 0.43+ (полностью)."""
     a = np.clip((np.nan_to_num(depth) - 0.08) / 0.35, 0, 1)
@@ -672,11 +688,12 @@ def _lens_png(depth: np.ndarray, rgb) -> str:
 
 
 def _lens_payload(sky: dict, maps: dict) -> dict:
+    clean = {k: _lens_denoise(v) for k, v in maps.items()}
     return _clean({
         "size_px": int(sky["shape"][0]),
-        "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in maps.items()},
-        "peak": {k: round(float(np.nanmax(v)), 3) if np.isfinite(v).any() else 0.0 for k, v in maps.items()},
-        "lit": {k: int(np.sum(np.nan_to_num(v) >= 0.2)) for k, v in maps.items()},
+        "maps": {k: _lens_png(v, LENS_RGB[k]) for k, v in clean.items()},
+        "peak": {k: round(float(v.max()), 3) if v.size else 0.0 for k, v in clean.items()},
+        "lit": {k: int(np.sum(v >= 0.2)) for k, v in clean.items()},
     })
 
 

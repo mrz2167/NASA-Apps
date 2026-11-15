@@ -282,6 +282,10 @@ footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);display
 @media (max-width:640px){
   .wrap{padding:0 16px 60px}
   .pill-rank,.pill-sep{display:none}
+  .pill-count{white-space:nowrap}
+  .wordmark{font-size:20px}
+  .pill{gap:8px;padding:6px 12px 6px 6px}
+  .hero{padding-top:68px}   /* keep the NASA Space Apps tag clear of the decorative amber arc */
   .rows div{grid-template-columns:100px 1fr}
   .topbar{grid-template-columns:auto 1fr auto}
   .crumb{font-size:9px;letter-spacing:.14em}
@@ -590,6 +594,8 @@ const MOLS = {
   co:      {label:"CO",       sym:"CO",  color:"#E0352B", bands:[[4.55,4.8]]}
 };
 const SIGN = 0.2; // molecule index above this = "sign"
+// methane: 0.15, the same threshold the server uses for "signs of methane" (identify.py)
+const signOf = k => k==="methane" ? 0.15 : SIGN;
 const EPOCHS = ["2025 · Survey 1","2025–26 · Survey 2","2026 · Survey 3","2026 · Latest"];
 
 /* motion: px per epoch (half a year); dx>0 = west (right), dy>0 = north (up)
@@ -617,7 +623,7 @@ const LEVELS = [
    teach:"You'll learn the blink method: stars stay put, nearby objects shift.",
    hint:"Don't stare at one dot. Relax your eyes and let the movement jump out at you.",
    fact:"On 18 February 1930, 24-year-old Clyde Tombaugh was flipping between two photos of the sky taken six days apart when he noticed a jumping dot. It was Pluto. Tombaugh was a farm boy with no university degree.",
-   found:{t:"You found something that moves", x:"It's WISE 0855, the coldest brown dwarf known: about as cold as the North Pole, only 7.4 light-years away. Between these two WISE photos, 2010 and 2024, it crossed almost two arcminutes of sky."}},
+   found:{t:"You found something that moves", x:"It's WISE 0855, the coldest brown dwarf known: about as cold as a winter day on Earth (around 250–285 K), only 7.4 light-years away. Between these two WISE photos, 2010 and 2024, it crossed almost two arcminutes of sky."}},
   {n:2, title:"False Alarm",
    task:"Two dots are blinking. Only one of them is real. Find it.",
    teach:"You'll learn to tell a real object from a glitch: real ones travel in a straight line, glitches flash once or blink in place.",
@@ -657,7 +663,7 @@ function levelText(n){
 }
 const examReal = () => S.ctx==="training" && S.level===5 && !!S.field?.exam;
 
-/* Advanced cases (levels 6–10). Did-you-know texts are drafts — review before submission. */
+/* Advanced cases (levels 6–10). */
 const CASES = [
   {id:"c1", level:6, target:"barnard", title:"The Runaway Star",
    brief:"The fastest-moving star in our sky is crossing it in plain view. Photographs taken weeks to months apart, and it still won't sit still.",
@@ -667,12 +673,12 @@ const CASES = [
    closing:"You measured a star crossing the sky by hand. Its catalogue speed is about 10 arcseconds a year — check how close you got.",
    fact:"Barnard's Star crosses a patch of sky as wide as the full Moon in about 180 years — faster than any other star. E. E. Barnard measured its motion in 1916."},
   {id:"c2", level:7, target:"wise0855", title:"The Coldest Ghost",
-   brief:"Something about the temperature of your freezer is drifting past the Sun's neighbours. In short-wavelength light it barely exists. Change your eyes.",
+   brief:"Something as cold as a winter day on Earth is drifting past the Sun's neighbours. In short-wavelength light it barely exists. Change your eyes.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"d1",t:"Look with Detector 1 (0.75–1.09 µm). See it?",ev:"detector",val:1},
           {id:"d6",t:"Now Detector 6 (4.42–5.00 µm)",ev:"detector",val:6},{id:"ch4",t:"Turn on the Methane lens",ev:"lens",val:"methane"},
           {id:"sel",t:"Open its file and read the spectrum",ev:"selectTarget"}],
    closing:"Invisible in one colour, bright in another, with a methane dip. That's how cold brown dwarfs give themselves away.",
-   fact:"WISE 0855−0714 is the coldest brown dwarf known, below the freezing point of water. Kevin Luhman discovered it in 2014, a year after finding Luhman 16, by its motion in WISE images."},
+   fact:"WISE 0855−0714 is the coldest brown dwarf known, about as cold as a winter day on Earth (around 250–285 K). Kevin Luhman discovered it in 2014, a year after finding Luhman 16, by its motion in WISE images."},
   {id:"c3", level:8, target:"epsindib", title:"Twins Too Close To Split",
    brief:"Two brown dwarfs orbit each other far closer than one SPHEREx pixel. You will never see two dots. Prove they're cold anyway.",
    steps:[{id:"scan",t:"Load the case field",ev:"scan"},{id:"zoom",t:"Zoom in as far as you can",ev:"zoom",val:4},
@@ -1437,7 +1443,7 @@ function drawOverlays(){
     const mol = tt===f.target ? (tt.mol||{}) : (S.lastObj?.molecules||{});
     const sc=mol[S.lens]||0, col=MOLS[S.lens].color, cl=(tt===f.target && tt.cloud)||1;
     ctx.save();
-    if(sc>=SIGN){
+    if(sc>=signOf(S.lens)){
       const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,px*4.5*cl);
       g.addColorStop(0,col+"cc"); g.addColorStop(.5,col+"44"); g.addColorStop(1,col+"00");
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,px*4.5*cl,0,7); ctx.fill();
@@ -1869,7 +1875,7 @@ function verdict(o){
   if(vr>=1.5 && !mv) return ["Variable star","Brightness changes, position steady."];
   if(isFaint(o)) return ["Nothing measurable here","Too faint to measure its motion or spectrum. Try a brighter dot."];
   if(isUnmatchedStar(o)) return ["Faint background source","Steady and still, too faint for the catalogues. Not a discovery: discoveries move or change."];
-  if(mv && m.methane>=SIGN) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
+  if(mv && m.methane>=signOf("methane")) return ["Looks like a cold brown dwarf","Moves across the sky and shows a methane dip."];
   if(mv && m.water>=.3) return ["Possibly a brown dwarf","Moves, with a strong water dip. Worth a closer look."];
   if(mv) return ["Nearby star on the move","High proper motion, no cold-world chemistry."];
   return ["Background star","Steady and still. Far away, and fine with it."];
@@ -1882,7 +1888,7 @@ function renderFile(o){
   const statusTxt=catWait ? (o.catalog_status==="pending" ? "CHECKING CATALOGUES…" : "CATALOGUES NOT ANSWERING") : {known:"KNOWN OBJECT",candidate:marked?"MARKED · CANDIDATE":"UNIDENTIFIED · CANDIDATE",star:isFaint(o)?"TOO FAINT TO MEASURE":isUnmatchedStar(o)?"STEADY · NO CATALOGUE ENTRY":"CATALOGUED STAR"}[o.status]||"OBJECT";
   const pm=o.motion||{}, arrow = pm.pa_deg!=null && isMoving(o) ? `<span class="arrow" style="transform:rotate(${-pm.pa_deg}deg)">↑</span> ${compass(pm.pa_deg)}` : "—";
   const cat = pm.catalog_arcsec_per_yr ? ` <span style="color:var(--muted-ink)">· catalogue ${pm.catalog_arcsec_per_yr}″/yr</span>` : "";
-  const mols=Object.keys(MOLS).map(k=>{ const v=Math.max(0,o.molecules?.[k]||0), sign=v>=SIGN;
+  const mols=Object.keys(MOLS).map(k=>{ const v=Math.max(0,o.molecules?.[k]||0), sign=v>=signOf(k);
     return `<div class="mol"><span><b>${MOLS[k].sym}</b> ${MOLS[k].label!==MOLS[k].sym?MOLS[k].label:""}</span><span class="bar"><i style="width:${Math.min(100,v*130)}%;background:${MOLS[k].color}"></i></span><span class="tag" style="color:${sign?MOLS[k].color:"var(--muted-ink)"}">${sign?"SIGN":"NONE"}</span></div>`; }).join("");
   const inL5 = S.ctx==="training" && S.level===5;
   $("file").innerHTML = `
@@ -1890,7 +1896,7 @@ function renderFile(o){
     <h3>${esc(objTitle(o, inL5))}</h3>
     <span class="status ${o.status}">${statusTxt}</span>
     <dl class="rows">
-      <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>${pm.significant===false?` <span style="color:var(--muted-ink)">· within noise</span>`:""}${cat}`}</dd></div>
+      <div><dt>Motion</dt><dd>${isFaint(o)?`<span style="color:var(--muted-ink)">not measurable</span>`:(pm.significant===false?`<b>no measurable motion</b> <span style="color:var(--muted-ink)">· shift within noise</span>`:`<b>${pm.arcsec_per_yr??"—"}${pm.arcsec_per_yr_err!=null?" ± "+pm.arcsec_per_yr_err:""}″/yr</b>`)+cat}</dd></div>
       <div><dt>Heading</dt><dd>${arrow}</dd></div>
       <div><dt>Brightness</dt><dd>${o.nospec?`<span style="color:var(--muted-ink)">not measured</span>`:(o.variability?.ratio||1)>=1.5?`varies ×${o.variability.ratio}`:"steady"}</dd></div>
       <div><dt>Catalogue</dt><dd>${o.catalog?esc(o.catalog):catWait?`<span style="color:var(--muted-ink)">${o.catalog_status==="pending"?"Still asking the star catalogues. Click the dot again in a few seconds.":"The star catalogues are not answering right now, so we can't tell yet whether this is known."}</span>`:o.status==="candidate"?"<b style='color:var(--red)'>No match. Nobody has named this yet.</b>":`<span style="color:var(--muted-ink)">No match${isFaint(o)?": too faint to pin down":". A faint steady dot, nothing to report"}</span>`}</dd></div>
@@ -1916,6 +1922,7 @@ function resetFile(){ $("file").innerHTML=`<div class="file-empty"><span class="
 function clearSpectrum(msg){ $("specSvg").innerHTML=`<text x="300" y="130" text-anchor="middle" fill="rgba(243,238,228,.45)" font-size="13" font-family="Manrope">${msg||"Select an object to read its light"}</text>`; $("specLabel").textContent=msg?"no spectrum":"no object"; }
 function renderSpectrum(o){
   const sp=o.spectrum; if(!sp) return clearSpectrum(o.nospec ? "No spectrum: WISE photos show one colour only" : "");
+  if(!sp.flux?.length) return clearSpectrum("Too bright to measure a spectrum: the detector saturates. Its brightness change still shows");
   const W=600,H=260,L=44,R=14,T=16,B=46, x=l=>L+(l-.75)/(5-.75)*(W-L-R);
   // Faint objects give negative fluxes (noise after background subtraction): the axis starts at 0,
   // such points sit on it as hollow dots ("no light detected here") instead of falling below the chart.
@@ -1960,7 +1967,7 @@ async function openReport(o){
   yy+=80; const [vt]=verdict(o);
   txt(g,vt,80,yy,"600 32px Manrope","#F07A3A");
   const f=S.field; const rows=[["FIELD", train && !f.exam?"Training field (simulated)":`RA ${f.ra.toFixed(4)}°  ·  Dec ${f.dec.toFixed(4)}°`],["MOTION",`${o.motion?.arcsec_per_yr??"—"}″ per year ${compass(o.motion?.pa_deg)}`],
-    ["CHEMISTRY", o.nospec ? "not measured (WISE photos)" : Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=SIGN).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
+    ["CHEMISTRY", o.nospec ? "not measured (WISE photos)" : Object.keys(MOLS).filter(k=>(o.molecules?.[k]||0)>=signOf(k)).map(k=>MOLS[k].sym).join("  ·  ")||"no clear signs"],["STATUS", o.status==="candidate"?"No catalogue match — candidate":isUnmatchedStar(o)?"No catalogue match — faint steady source":"Catalogued"]];
   yy+=70; for(const [k,v] of rows){ txt(g,k,80,yy,"600 18px Manrope","rgba(243,238,228,.5)",5); txt(g,v,330,yy,"400 28px Manrope","#F3EEE4"); yy+=58; }
   txt(g,"Signs, not proof. Ad Lumen.",80,1270,"400 22px Manrope","rgba(243,238,228,.6)");
   S.reportUrl=c.toDataURL("image/png"); $("reportImg").src=S.reportUrl;

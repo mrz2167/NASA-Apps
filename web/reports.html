@@ -131,7 +131,7 @@ h2{font-size:18px;margin-top:22px}
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const SIGN=0.2, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
+const SIGN=0.2, signOf=k=>k==="methane"?0.15:SIGN, MOL={water:"H₂O",methane:"CH₄",co2:"CO₂",co:"CO"};
 let data=null, summ=null, timer=null, view="class";
 
 function params(){ const p=new URLSearchParams(); p.set("key",$("key").value.trim()); const c=$("cls").value.trim(); if(c) p.set("class_code",c); return p; }
@@ -157,13 +157,13 @@ function render(){
   $("sN").textContent=all.length;
   $("sS").textContent=new Set(all.map(r=>(r.name||"").trim().toLowerCase()).filter(Boolean)).size;
   $("sC").textContent=all.filter(r=>r.status==="candidate").length;
-  $("sM").textContent=all.filter(r=>Object.values(r.molecules||{}).some(v=>v>=SIGN)).length;
+  $("sM").textContent=all.filter(r=>Object.entries(r.molecules||{}).some(([k,v])=>v>=signOf(k))).length;
   $("out").hidden=false;
   const hint=data.persistent_hint ? " ⚠ "+data.persistent_hint : "";
   $("msg").className="msg"+(hint?" warn":""); $("msg").hidden=!hint; $("msg").textContent=hint.trim();
   if(!rows.length){ $("rows").innerHTML=`<tr><td colspan="9" class="empty">No reports yet. They appear here as soon as someone taps “Send report” on the site.</td></tr>`; return; }
   $("rows").innerHTML=rows.map(r=>{
-    const chem=Object.keys(MOL).filter(k=>(r.molecules?.[k]||0)>=SIGN).map(k=>`<span>${MOL[k]} ${r.molecules[k].toFixed(2)}</span>`).join("")||`<span style="color:var(--faint)">none</span>`;
+    const chem=Object.keys(MOL).filter(k=>(r.molecules?.[k]||0)>=signOf(k)).map(k=>`<span>${MOL[k]} ${r.molecules[k].toFixed(2)}</span>`).join("")||`<span style="color:var(--faint)">none</span>`;
     const mv=r.motion!=null?`${r.motion.toFixed(2)}″/yr${r.motion_err!=null?` <small style="color:var(--faint)">±${r.motion_err.toFixed(2)}</small>`:""}`:"—";
     const cat=r.catalog_motion!=null?`<br><small style="color:var(--faint)">catalogue ${r.catalog_motion.toFixed(2)}″/yr</small>`:"";
     const links = r.ra!=null ? `<a href="/?ra=${r.field_ra??r.ra}&dec=${r.field_dec??r.dec}&fov=${r.fov||0.1}" target="_blank" rel="noopener">Open in LUMEN</a>
