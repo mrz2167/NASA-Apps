@@ -795,6 +795,8 @@ const store = {
 };
 const P = Object.assign({done:{}, steps:{}, tips:{}, name:"", epochSteps:0}, store.get()||{});
 const save = () => store.set(P);
+// class code from the teacher's link (?class=7B) is remembered and sent with field reports
+try{ const cc=new URLSearchParams(location.search).get("class"); if(cc && /^[\w\- ]{1,24}$/.test(cc)){ P.classCode=cc.trim(); save(); } }catch(e){}
 
 const S = { ctx:null, level:null, caseId:null, field:null, epoch:0, det:4, cadence:"pass", survey:"spherex", mode:"blink", lens:"none", zoom:1, playing:false, timer:null, speed:700,
             selected:null, ring:null, frames:null, apiFrames:null, lastObj:null, tr:{} };
@@ -1978,7 +1980,7 @@ $("sendReport").onclick=async()=>{
   const o=S.reportObj, f=S.field; if(!o || !f) return;
   if(!P.client){ P.client=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()); save(); }
   const at=S.track ? {ra:S.track.ra, dec:S.track.dec} : (S.selSky || {ra:f.ra, dec:f.dec}), m=o.motion||{};
-  const body={client:P.client, name:(P.name||"").trim(),
+  const body={client:P.client, class_code:P.classCode||null, name:(P.name||"").trim(),
     ra:((at.ra%360)+360)%360, dec:at.dec, field_ra:f.ra, field_dec:f.dec, fov:f.fov,
     object_name:o.name||null, status:["known","candidate","star"].includes(o.status)?o.status:"candidate",
     verdict:verdict(o)[0], motion:m.arcsec_per_yr??null, motion_err:m.arcsec_per_yr_err??null, pa:m.pa_deg??null,
